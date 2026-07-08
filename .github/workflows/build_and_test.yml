@@ -92,13 +92,13 @@ jobs:
       - name: Verificar PE x64 (COFF machine = AMD64)
         shell: pwsh
         run: |
-          $bundle = Get-ChildItem -Recurse -Directory -Path build -Filter *.vst3 |
-                    Where-Object { $_.FullName -match '_artefacts' } | Select-Object -First 1
-          if (-not $bundle) { Write-Error "No encontré el bundle .vst3"; exit 1 }
-          $bin = Get-ChildItem -Recurse -File -Path $bundle.FullName -Filter *.vst3 | Select-Object -First 1
+          # El binario PE vive dentro del bundle en Contents\x86_64-win\ORBIT.vst3.
+          $bin = Get-ChildItem -Recurse -File -Path build -Filter *.vst3 |
+                 Where-Object { $_.FullName -match 'x86_64-win' } | Select-Object -First 1
+          if (-not $bin) { Write-Error "No encontré el binario .vst3 (x86_64-win)"; exit 1 }
           Write-Host "VST3 binary: $($bin.FullName)"
-          $bytes  = [System.IO.File]::ReadAllBytes($bin.FullName)
-          $peOff  = [BitConverter]::ToInt32($bytes, 0x3C)
+          $bytes   = [System.IO.File]::ReadAllBytes($bin.FullName)
+          $peOff   = [BitConverter]::ToInt32($bytes, 0x3C)
           $machine = [BitConverter]::ToUInt16($bytes, $peOff + 4)
           Write-Host ("COFF machine: 0x{0:X4}" -f $machine)
           if ($machine -ne 0x8664) { Write-Error "No es x64 (esperaba 0x8664)"; exit 1 }
