@@ -127,3 +127,10 @@ Estas tipografías se incluyen en `assets/fonts/` y se embeben en el binario par
   a los términos de redistribución de Intel; no se modifica ni se reempaqueta su fuente.
 - **La HRIR horneada** deriva de **CIPIC subject 003** (dominio público para investigación,
   con atribución a los autores); el SOFA no se commitea (vive fuera del repo).
+
+---
+
+## Fonts embedded in the UI (ui-kit assets)
+- **Clash Grotesk** (Semibold) — Indian Type Foundry, distributed via Fontshare — ITF Free Font License.
+- **General Sans** (Regular, Medium) — Indian Type Foundry, distributed via Fontshare — ITF Free Font License.
+- **JetBrains Mono** (Regular) — The JetBrains Mono Project Authors — SIL Open Font License, Version 1.1 (OFL-1.1). Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono).
