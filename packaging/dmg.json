@@ -1,0 +1,22 @@
+{
+  "title": "OVNI ORBIT",
+  "icon": "icon.icns",
+  "background": "background.jpg",
+  "window": {
+    "position": {
+      "x": 100,
+      "y": 100
+    },
+    "size": {
+      "width": 730,
+      "height": 520
+    }
+  },
+  "format": "UDZO",
+  "contents": [
+    { "x": 250, "y": 250, "type": "file", "path": "dmg/ORBIT.component" },
+    { "x": 480, "y": 250, "type": "link", "path": "/Library/Audio/Plug-Ins/Components" },
+    { "x": 250, "y": 380, "type": "file", "path": "dmg/ORBIT.vst3" },
+    { "x": 480, "y": 380, "type": "link", "path": "/Library/Audio/Plug-Ins/VST3" }
+  ]
+}

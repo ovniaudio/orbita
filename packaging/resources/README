@@ -1,0 +1,15 @@
+Thanks for installing OVNI ORBIT 🛸
+
+ORBIT is a free, open-source binaural movement plugin for macOS — place a sound anywhere in
+real 3D, set it orbiting, or fly it past with real Doppler.
+
+The plugins install to:
+  VST3:  /Library/Audio/Plug-Ins/VST3
+  AU:    /Library/Audio/Plug-Ins/Components
+
+ORBIT is unsigned. If macOS blocks it the first time, clear the quarantine flag in Terminal:
+  xattr -dr com.apple.quarantine "/Library/Audio/Plug-Ins/VST3/ORBIT.vst3"
+
+Free and open-source under AGPLv3 · source at github.com/ovniaudio/orbita
+
+More at ovniaudio.com
