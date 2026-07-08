@@ -72,7 +72,9 @@ jobs:
   # ---------------------------------------------------------------------------------------------
   windows:
     name: Windows · build + pluginval (VST3, sin IPP)
-    runs-on: windows-latest
+    # windows-2022 (no windows-latest): el label latest ya rodó a una imagen sin VS 2022 (v17)
+    # → el generador "Visual Studio 17 2022" no encuentra instancia. windows-2022 trae VS 2022.
+    runs-on: windows-2022
     steps:
       - name: Checkout (con submódulos)
         uses: actions/checkout@v6
