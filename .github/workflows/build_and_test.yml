@@ -62,3 +62,57 @@ jobs:
           path: |
             build/Orbita_artefacts/${{ env.BUILD_TYPE }}/VST3/ORBITA.vst3
             build/Orbita_artefacts/${{ env.BUILD_TYPE }}/AU/ORBITA.component
+
+  # ---------------------------------------------------------------------------------------------
+  # M6 — Windows (VST3). Build MSVC x64 en windows-latest + pluginval strictness 10.
+  # Camino A (v1): SIN Intel IPP. PamplejuceIPP.cmake apunta el IPP_ROOT al paquete NuGet
+  # intelipp.static.win-x64; como NO lo instalamos, su guard `if (IS_DIRECTORY IPP_ROOT)` da falso
+  # y ORBIT compila JUCE puro (la misma ruta que ya corre la slice arm64 en Mac). Cero NuGet.
+  # Windows = VST3 (JUCE omite AU; CLAP está deshabilitado). Sin firmar → SmartScreen (ZIP en Release).
+  # ---------------------------------------------------------------------------------------------
+  windows:
+    name: Windows · build + pluginval (VST3, sin IPP)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout (con submódulos)
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Configurar (Visual Studio 2022, x64, sin IPP)
+        run: >
+          cmake -B build -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_BUILD_TYPE=$BUILD_TYPE .
+
+      - name: Compilar ORBIT (solo VST3)
+        run: cmake --build build --config $BUILD_TYPE --target Orbita_VST3
+
+      - name: Verificar PE x64 (COFF machine = AMD64)
+        shell: pwsh
+        run: |
+          $bundle = Get-ChildItem -Recurse -Directory -Path build -Filter *.vst3 |
+                    Where-Object { $_.FullName -match '_artefacts' } | Select-Object -First 1
+          if (-not $bundle) { Write-Error "No encontré el bundle .vst3"; exit 1 }
+          $bin = Get-ChildItem -Recurse -File -Path $bundle.FullName -Filter *.vst3 | Select-Object -First 1
+          Write-Host "VST3 binary: $($bin.FullName)"
+          $bytes  = [System.IO.File]::ReadAllBytes($bin.FullName)
+          $peOff  = [BitConverter]::ToInt32($bytes, 0x3C)
+          $machine = [BitConverter]::ToUInt16($bytes, $peOff + 4)
+          Write-Host ("COFF machine: 0x{0:X4}" -f $machine)
+          if ($machine -ne 0x8664) { Write-Error "No es x64 (esperaba 0x8664)"; exit 1 }
+          Write-Host "OK: PE x64 (AMD64)"
+
+      - name: Pluginval (strictness 10)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o pluginval.zip "https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip"
+          unzip -oq pluginval.zip
+          bundle=$(find build -type d -path '*_artefacts/*/VST3/*.vst3' | head -1)
+          echo "pluginval → $bundle"
+          ./pluginval.exe --strictness-level 10 --validate "$bundle"
+
+      - name: Subir artefacto (ORBIT VST3 Windows)
+        uses: actions/upload-artifact@v7
+        with:
+          name: ORBIT-windows-vst3
+          path: build/Orbita_artefacts/${{ env.BUILD_TYPE }}/VST3/ORBIT.vst3
