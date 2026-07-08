@@ -27,7 +27,7 @@ jobs:
     runs-on: macos-14
     steps:
       - name: Checkout (con submódulos)
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
