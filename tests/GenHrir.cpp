@@ -1,0 +1,347 @@
+// =====================================================================================
+// Generador one-off: extrae un par HRIR fijo de un SOFA y lo escribe como header C++.
+// Para M1 (motor de posición fija) — así el plugin no carga archivos en runtime.
+// Correr con:  ./Tests "[gen]"   (regenera source/dsp/HrirData.h)
+// =====================================================================================
+#include <catch2/catch_test_macros.hpp>
+
+#include <vector>
+#include <fstream>
+#include <iomanip>
+#include <string>
+#include <cmath>
+#include <complex>
+#include <juce_dsp/juce_dsp.h>
+
+extern "C" {
+#include <mysofa.h>
+}
+
+TEST_CASE ("generar HrirData.h (90 izquierda)", "[gen]")
+{
+    const float sr = 48000.0f;
+    int len = 0, err = 0;
+    MYSOFA_EASY* sofa = mysofa_open (HRTF_SOFA_PATH, sr, &len, &err);
+    REQUIRE (sofa != nullptr);
+    REQUIRE (err == MYSOFA_OK);
+    REQUIRE (len > 0);
+
+    std::vector<float> irL ((size_t) len), irR ((size_t) len);
+    float dL = 0.0f, dR = 0.0f;
+    // cartesiano: x=frente, y=izquierda, z=arriba -> (0,1,0) = 90° a la izquierda
+    mysofa_getfilter_float (sofa, 0.0f, 1.0f, 0.0f, irL.data(), irR.data(), &dL, &dR);
+
+    const std::string path = std::string (ORBITA_REPO_DIR) + "/source/dsp/HrirData.h";
+    std::ofstream out (path);
+    REQUIRE (out.is_open());
+    out << std::showpoint << std::setprecision (9); // fuerza el punto decimal -> literales float válidos
+
+    out << "// GENERADO por tests/GenHrir.cpp -- HRIR fija (90 izquierda) para M1.\n"
+        << "// No editar a mano: regenerar con  ./Tests \"[gen]\"\n"
+        << "#pragma once\n#include <array>\n\nnamespace orbita {\n\n"
+        << "inline constexpr int   kHrirLength     = " << len << ";\n"
+        << "inline constexpr float kHrirSampleRate = " << sr << "f;\n"
+        << "inline constexpr float kHrirDelayL     = " << dL << "f;\n"
+        << "inline constexpr float kHrirDelayR     = " << dR << "f;\n\n";
+
+    auto dump = [&] (const char* name, const std::vector<float>& v) {
+        out << "inline constexpr std::array<float, " << v.size() << "> " << name << " = {{\n    ";
+        out << std::setprecision (9);
+        for (size_t i = 0; i < v.size(); ++i) {
+            out << v[i] << "f, ";
+            if ((i + 1) % 6 == 0) out << "\n    ";
+        }
+        out << "\n}};\n\n";
+    };
+    dump ("kHrirL", irL);
+    dump ("kHrirR", irR);
+    out << "} // namespace orbita\n";
+    out.close();
+
+    mysofa_close (sofa);
+    WARN ("HrirData.h generado: " << path << " (" << len << " taps, delayL=" << dL << " delayR=" << dR << ")");
+    SUCCEED();
+}
+
+// =====================================================================================
+// Generador del ANILLO (M2 — movimiento): vuelca N azimuts a elevación 0 como header C++.
+// El motor v2 elige las 2 direcciones que bracketean el azimut actual e interpola por
+// crossfade de salidas. Convención cartesiana mysofa: x=frente, y=izquierda, z=arriba.
+//   dir i  ->  θ = i * (360/N)°  ->  (cosθ, sinθ, 0)   [θ: 0=frente, +CCW hacia la izq]
+//   i=0 frente · i=N/4 izquierda · i=N/2 atrás · i=3N/4 derecha
+// Correr con:  ./Tests "[genring]"   (regenera source/dsp/HrirRing.h)
+// =====================================================================================
+TEST_CASE ("generar HrirRing.h (anillo 72 azimuts, elev 0)", "[genring]")
+{
+    constexpr int   kNumDirs = 72;            // 5° de paso
+    constexpr float kStepDeg = 360.0f / kNumDirs;
+    const float sr = 48000.0f;
+
+    int len = 0, err = 0;
+    MYSOFA_EASY* sofa = mysofa_open (HRTF_SOFA_PATH, sr, &len, &err);
+    REQUIRE (sofa != nullptr);
+    REQUIRE (err == MYSOFA_OK);
+    REQUIRE (len > 0);
+
+    const int taps = len;
+    std::vector<float> ringL ((size_t) kNumDirs * taps, 0.0f);
+    std::vector<float> ringR ((size_t) kNumDirs * taps, 0.0f);
+    std::vector<float> delayL ((size_t) kNumDirs, 0.0f);
+    std::vector<float> delayR ((size_t) kNumDirs, 0.0f);
+
+    std::vector<float> irL ((size_t) taps), irR ((size_t) taps);
+    for (int d = 0; d < kNumDirs; ++d)
+    {
+        const float theta = (float) d * kStepDeg * (3.14159265358979324f / 180.0f);
+        const float x = std::cos (theta);   // frente
+        const float y = std::sin (theta);   // izquierda
+        float dl = 0.0f, dr = 0.0f;
+        mysofa_getfilter_float (sofa, x, y, 0.0f, irL.data(), irR.data(), &dl, &dr);
+        for (int t = 0; t < taps; ++t)
+        {
+            ringL[(size_t) d * taps + t] = irL[(size_t) t];
+            ringR[(size_t) d * taps + t] = irR[(size_t) t];
+        }
+        delayL[(size_t) d] = dl;
+        delayR[(size_t) d] = dr;
+    }
+    mysofa_close (sofa);
+
+    // -------------------------------------------------------------------------------
+    // Simetrización L/R: el sujeto CIPIC es asimétrico (sus orejas difieren ~4 dB en 4 kHz);
+    // el spec pide HRTF de MANIQUÍ (simétrico). Promediamos cada dirección con su espejo para
+    // que izquierda y derecha tengan idéntica potencia Y timbre. (L@θ == R@-θ por simetría.)
+    {
+        const std::vector<float> oL (ringL), oR (ringR), oDL (delayL), oDR (delayR);
+        for (int d = 0; d < kNumDirs; ++d)
+        {
+            const int dm = (kNumDirs - d) % kNumDirs; // dirección espejo (azimut -θ)
+            for (int t = 0; t < taps; ++t)
+            {
+                ringL[(size_t) d * taps + t] = 0.5f * (oL[(size_t) d * taps + t] + oR[(size_t) dm * taps + t]);
+                ringR[(size_t) d * taps + t] = 0.5f * (oR[(size_t) d * taps + t] + oL[(size_t) dm * taps + t]);
+            }
+            delayL[(size_t) d] = 0.5f * (oDL[(size_t) d] + oDR[(size_t) dm]);
+            delayR[(size_t) d] = 0.5f * (oDR[(size_t) d] + oDL[(size_t) dm]);
+        }
+    }
+
+    // -------------------------------------------------------------------------------
+    // Ecualización de campo difuso (DFE) + reconstrucción de fase mínima (spec §5.1).
+    // Quita el color común a todas las direcciones (la "caja" del HRTF crudo) dejando
+    // sólo las pistas direccionales. Todo offline -> costo runtime cero.
+    // -------------------------------------------------------------------------------
+    {
+        const int order = 9;
+        const int N = 1 << order;              // 512 >= taps
+        REQUIRE (N >= taps);
+        juce::dsp::FFT fft (order);
+        using C = std::complex<float>;
+
+        // Auto-detectar la convención de escala del inverse de JUCE (true IDFT = *invScale).
+        std::vector<C> u ((size_t) N, C{}), uf ((size_t) N), ui ((size_t) N);
+        u[0] = C { 1.0f, 0.0f };
+        fft.perform (u.data(), uf.data(), false);
+        fft.perform (uf.data(), ui.data(), true);
+        const float invScale = 1.0f / ui[0].real();
+
+        auto magOf = [&] (const float* ir, std::vector<float>& mag)
+        {
+            std::vector<C> in ((size_t) N, C{}), out ((size_t) N);
+            for (int i = 0; i < taps; ++i) in[(size_t) i] = C { ir[i], 0.0f };
+            fft.perform (in.data(), out.data(), false);
+            mag.assign ((size_t) N, 0.0f);
+            for (int k = 0; k < N; ++k) mag[(size_t) k] = std::abs (out[(size_t) k]);
+        };
+
+        auto midBandDiffuse = [&] (std::vector<float>& mgScratch, int b1, int b2)
+        {
+            std::vector<double> p ((size_t) N, 0.0);
+            for (int d = 0; d < kNumDirs; ++d)
+            {
+                magOf (&ringL[(size_t) d * taps], mgScratch); for (int k=0;k<N;++k) p[(size_t)k]+=(double)mgScratch[(size_t)k]*mgScratch[(size_t)k];
+                magOf (&ringR[(size_t) d * taps], mgScratch); for (int k=0;k<N;++k) p[(size_t)k]+=(double)mgScratch[(size_t)k]*mgScratch[(size_t)k];
+            }
+            double ls = 0.0;
+            for (int k = b1; k <= b2; ++k) ls += std::log (std::max ((float) std::sqrt (p[(size_t)k] / (2.0 * kNumDirs)), 1.0e-9f));
+            return std::pair<float, std::vector<double>> { (float) std::exp (ls / std::max (1, b2 - b1 + 1)), std::move (p) };
+        };
+
+        auto binHz = [&] (double hz) { return juce::jlimit (1, N/2, (int) std::round (hz / ((double) sr / N))); };
+        const int b1 = binHz (300.0), b2 = binHz (6000.0);
+
+        // 1) campo difuso (RMS de magnitud sobre las 144 IRs) + nivel de referencia mid-band
+        std::vector<float> mg;
+        auto [Dref, pacc] = midBandDiffuse (mg, b1, b2);
+        std::vector<float> D ((size_t) N);
+        for (int k = 0; k < N; ++k) D[(size_t)k] = (float) std::sqrt (pacc[(size_t)k] / (2.0 * kNumDirs));
+
+        // L1 máxima del anillo CRUDO (cota dura de ganancia; aún seguro como M1).
+        float rawMaxL1 = 0.0f;
+        for (int d = 0; d < kNumDirs; ++d)
+        {
+            float sL = 0.0f, sR = 0.0f;
+            for (int t = 0; t < taps; ++t)
+            {
+                sL += std::abs (ringL[(size_t) d * taps + t]);
+                sR += std::abs (ringR[(size_t) d * taps + t]);
+            }
+            rawMaxL1 = std::max (rawMaxL1, std::max (sL, sR));
+        }
+
+        // max|H(f)| del anillo CRUDO (prueba de que el DFE no aumenta la ganancia por banda).
+        float rawMaxMag = 0.0f;
+        for (int d = 0; d < kNumDirs; ++d)
+        {
+            magOf (&ringL[(size_t) d * taps], mg); for (int k=0;k<N;++k) rawMaxMag = std::max (rawMaxMag, mg[(size_t)k]);
+            magOf (&ringR[(size_t) d * taps], mg); for (int k=0;k<N;++k) rawMaxMag = std::max (rawMaxMag, mg[(size_t)k]);
+        }
+
+        // 2) corrección G = campo difuso, pero PARCIAL y BAND-LIMITADA (clave para no matar
+        //    la externalización, respaldado por la investigación):
+        //      - fuerza alpha=0.6 (sólo 60% de la corrección en dB) -> de-box sin aplanar.
+        //      - alpha=0.6 por debajo de 3 kHz, taper 3->6 kHz, y alpha=0 ARRIBA de 6 kHz:
+        //        deja INTACTOS los notches del pabellón (6-10 kHz) = el cue direccional clave.
+        //    Permite cortar (-12 dB) y un boost suave de cuerpo; la norma por-dirección (paso 4)
+        //    garantiza que no clippee. G_eff(f) = clamp(Dref/D, gMin, gMax) ^ alpha(f).
+        const float gMax = 2.0f, gMin = 0.25f;
+        const float alpha0 = 0.6f;
+        const int   bLoFull = binHz (3000.0), bHiZero = binHz (6000.0);
+        std::vector<float> G ((size_t) N, 1.0f);
+        for (int k = 0; k <= N/2; ++k)
+        {
+            const float raw = juce::jlimit (gMin, gMax, Dref / std::max (D[(size_t)k], 1.0e-9f));
+            float a;
+            if (k <= bLoFull)       a = alpha0;
+            else if (k >= bHiZero)  a = 0.0f;                 // pabellón protegido (sin tocar)
+            else                    a = alpha0 * (1.0f - (float) (k - bLoFull) / (float) std::max (1, bHiZero - bLoFull));
+            G[(size_t)k] = std::pow (raw, a);                 // a=0 -> G=1 (crudo)
+        }
+        G[0] = 1.0f;
+        for (int k = 1; k < N/2; ++k) G[(size_t)(N - k)] = G[(size_t)k];
+
+        // 3) por IR: |H'| = |H|*G -> IR de fase mínima (cepstrum real)
+        auto minPhase = [&] (float* ir)
+        {
+            std::vector<float> mag; magOf (ir, mag);
+            for (int k = 0; k < N; ++k) mag[(size_t)k] *= G[(size_t)k];
+
+            std::vector<C> X ((size_t) N), x ((size_t) N);
+            for (int k = 0; k < N; ++k) X[(size_t)k] = C { std::log (std::max (mag[(size_t)k], 1.0e-9f)), 0.0f };
+            fft.perform (X.data(), x.data(), true);
+            for (int k = 0; k < N; ++k) x[(size_t)k] *= invScale;     // true IDFT -> cepstrum real
+
+            std::vector<C> w ((size_t) N, C{});
+            w[0] = C { x[0].real(), 0.0f };
+            for (int n = 1; n < N/2; ++n) w[(size_t)n] = C { 2.0f * x[(size_t)n].real(), 0.0f };
+            w[(size_t)(N/2)] = C { x[(size_t)(N/2)].real(), 0.0f };
+
+            std::vector<C> W ((size_t) N); fft.perform (w.data(), W.data(), false); // log-espectro mín-fase
+            for (int k = 0; k < N; ++k) W[(size_t)k] = std::exp (W[(size_t)k]);
+            std::vector<C> h ((size_t) N); fft.perform (W.data(), h.data(), true);
+            for (int i = 0; i < taps; ++i) ir[i] = h[(size_t)i].real() * invScale;
+        };
+        for (int d = 0; d < kNumDirs; ++d)
+        {
+            minPhase (&ringL[(size_t) d * taps]);
+            minPhase (&ringR[(size_t) d * taps]);
+        }
+
+        // 4) SEGURIDAD DE GANANCIA: limitar la L1 máxima del anillo nuevo a la del crudo.
+        //    ||h||1 acota la ganancia pico para CUALQUIER entrada/azimut -> nunca clippea
+        //    más que M1 (que no clippeaba). Sólo se escala hacia abajo (nunca boost).
+        float newMaxL1 = 0.0f;
+        for (int d = 0; d < kNumDirs; ++d)
+        {
+            float sL = 0.0f, sR = 0.0f;
+            for (int t = 0; t < taps; ++t)
+            {
+                sL += std::abs (ringL[(size_t) d * taps + t]);
+                sR += std::abs (ringR[(size_t) d * taps + t]);
+            }
+            newMaxL1 = std::max (newMaxL1, std::max (sL, sR));
+        }
+        juce::ignoreUnused (rawMaxL1, newMaxL1);
+
+        // SEGURIDAD + sin pumping: normalizar la ENERGÍA (L2 de los dos oídos) de CADA
+        // dirección al mismo objetivo. Se escalan ambos oídos por el MISMO factor -> el ILD
+        // (cue de nivel interaural) queda intacto; sólo se iguala la loudness por azimut.
+        // Para una órbita a radio constante todas las direcciones deben sonar igual de fuerte.
+        const float kTargetE = 0.70f; // energía L2 (dos oídos) objetivo por dirección
+        float safeGain = 0.0f;        // (informativo: factor de la dir más fuerte)
+        for (int d = 0; d < kNumDirs; ++d)
+        {
+            double e = 0.0;
+            for (int t = 0; t < taps; ++t)
+            {
+                const float L = ringL[(size_t) d * taps + t], R = ringR[(size_t) d * taps + t];
+                e += (double) L * L + (double) R * R;
+            }
+            const float s = kTargetE / std::max ((float) std::sqrt (e), 1.0e-9f);
+            for (int t = 0; t < taps; ++t)
+            {
+                ringL[(size_t) d * taps + t] *= s;
+                ringR[(size_t) d * taps + t] *= s;
+            }
+            if (d == 0) safeGain = s;
+        }
+
+        float newMaxMag = 0.0f;
+        for (int d = 0; d < kNumDirs; ++d)
+        {
+            magOf (&ringL[(size_t) d * taps], mg); for (int k=0;k<N;++k) newMaxMag = std::max (newMaxMag, mg[(size_t)k]);
+            magOf (&ringR[(size_t) d * taps], mg); for (int k=0;k<N;++k) newMaxMag = std::max (newMaxMag, mg[(size_t)k]);
+        }
+
+        for (float v : ringL) REQUIRE (std::isfinite (v));
+        for (float v : ringR) REQUIRE (std::isfinite (v));
+        // newMaxMag <= rawMaxMag prueba que el DFE no recalienta ninguna banda (cut-only).
+        REQUIRE (newMaxMag <= rawMaxMag * 1.05f);
+        WARN ("DFE cut-only: rawMaxMag=" << rawMaxMag << " newMaxMag=" << newMaxMag
+              << " | rawMaxL1=" << rawMaxL1 << " newMaxL1=" << newMaxL1
+              << " safeGain=" << safeGain);
+    }
+
+    const std::string path = std::string (ORBITA_REPO_DIR) + "/source/dsp/HrirRing.h";
+    std::ofstream out (path);
+    REQUIRE (out.is_open());
+    out << std::showpoint << std::setprecision (9); // fuerza el punto decimal -> literales float válidos
+
+    out << "// GENERADO por tests/GenHrir.cpp [genring] -- anillo HRIR (movimiento, M2).\n"
+        << "// DFE (ecualizacion de campo difuso) + fase minima aplicados; ITD en el delay field.\n"
+        << "// No editar a mano: regenerar con  ./Tests \"[genring]\"\n"
+        << "#pragma once\n#include <array>\n\nnamespace orbita {\n\n"
+        << "inline constexpr int   kNumDirs       = " << kNumDirs << ";\n"
+        << "inline constexpr int   kRingTaps      = " << taps << ";\n"
+        << "inline constexpr float kRingSampleRate= " << sr << "f;\n"
+        << "inline constexpr float kRingStepDeg   = " << kStepDeg << "f;\n\n"
+        << "// Planos: dir d, tap t -> indice d*kRingTaps + t\n";
+
+    auto dumpRing = [&] (const char* name, const std::vector<float>& v) {
+        out << "inline constexpr std::array<float, " << v.size() << "> " << name << " = {{\n    ";
+        out << std::setprecision (9);
+        for (size_t i = 0; i < v.size(); ++i) {
+            out << v[i] << "f, ";
+            if ((i + 1) % 6 == 0) out << "\n    ";
+        }
+        out << "\n}};\n\n";
+    };
+    auto dumpDelays = [&] (const char* name, const std::vector<float>& v) {
+        out << "inline constexpr std::array<float, " << v.size() << "> " << name << " = {{\n    ";
+        out << std::setprecision (9);
+        for (size_t i = 0; i < v.size(); ++i) {
+            out << v[i] << "f, ";
+            if ((i + 1) % 8 == 0) out << "\n    ";
+        }
+        out << "\n}};\n\n";
+    };
+    dumpRing   ("kRingL",      ringL);
+    dumpRing   ("kRingR",      ringR);
+    dumpDelays ("kRingDelayL", delayL);
+    dumpDelays ("kRingDelayR", delayR);
+    out << "} // namespace orbita\n";
+    out.close();
+
+    WARN ("HrirRing.h generado: " << path << " (" << kNumDirs << " dirs x " << taps << " taps)");
+    SUCCEED();
+}

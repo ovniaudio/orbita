@@ -1,0 +1,64 @@
+name: Build & Validate
+
+# CI de etapa M0–M5: build universal macOS + tests + pluginval.
+# Firma (Developer ID), notarización, instalador .pkg y cross-platform
+# (Windows/Linux/AAX) se agregan en M6, cuando existan los secrets.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  macos:
+    name: macOS · build + pluginval
+    runs-on: macos-14
+    steps:
+      - name: Checkout (con submódulos)
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Instalar Ninja
+        run: brew install ninja
+
+      - name: Configurar (universal arm64 + x86_64)
+        run: >
+          cmake -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" .
+
+      - name: Compilar
+        run: cmake --build build --config $BUILD_TYPE
+
+      - name: Tests (Catch2)
+        working-directory: build
+        run: ctest --output-on-failure
+
+      - name: Pluginval (strictness 8)
+        run: |
+          curl -fsSL -o pluginval.zip "https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip"
+          unzip -oq pluginval.zip
+          ./pluginval.app/Contents/MacOS/pluginval \
+            --strictness-level 8 --validate-in-process \
+            "build/Orbita_artefacts/$BUILD_TYPE/VST3/ORBITA.vst3"
+
+      - name: Subir artefactos
+        uses: actions/upload-artifact@v7
+        with:
+          name: ORBITA-macos
+          path: |
+            build/Orbita_artefacts/${{ env.BUILD_TYPE }}/VST3/ORBITA.vst3
+            build/Orbita_artefacts/${{ env.BUILD_TYPE }}/AU/ORBITA.component
