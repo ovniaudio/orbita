@@ -238,6 +238,15 @@ void SpatialEngine::process (juce::AudioBuffer<float>& buffer, int numInputChann
 
     // 0) capturar el SECO = entrada original (preserva el estéreo; mono -> centrado).
     //    Se usa en el mix seco/efectado; así bajar Mix recupera la señal original.
+    // NOTA (limitación conocida, aceptada): el seco se captura con delay 0, mientras el wet
+    //    arrastra el delay de propagación del Doppler (~dopplerCenterSamples ≈ 8.8 ms @48k). Con
+    //    Doppler>0 y Mix<100% eso produce un comb (flanger) entre seco y wet. NO se corrige
+    //    retardando el seco: (a) agregaría latencia no reportada a toda la pista (no hay PDC/
+    //    setLatencySamples y Doppler es una perilla en vivo -> la latencia no se puede reportar
+    //    estáticamente), y (b) el delay del wet es variable, así que sólo se alinearía el cruce
+    //    az=±90° y volvería el flanger en movimiento. Es físicamente plausible (fly-by = directo +
+    //    arribo retardado) y el wet está decorrelado (HRIR+reflexiones+ILD) -> el comb es coloración
+    //    leve, no cancelación. Bypass real a Doppler=0 -> sin comb en el uso normal.
     auto* dryL = dryBuf.getWritePointer (0);
     auto* dryR = dryBuf.getWritePointer (1);
     juce::FloatVectorOperations::copy (dryL, buffer.getReadPointer (0), n);

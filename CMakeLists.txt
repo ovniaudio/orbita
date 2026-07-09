@@ -160,8 +160,12 @@ target_link_libraries(SharedCode
 # Link the JUCE plugin targets our SharedCode target
 target_link_libraries("${PROJECT_NAME}" PRIVATE SharedCode)
 
-# IPP support, comment out to disable
-include(PamplejuceIPP)
+# IPP support DISABLED intencionalmente (v0.1.1): IPP es propietaria y su
+# link estatico en el slice x86_64 de macOS es incompatible con JUCE-AGPLv3.
+# ORBIT no llama a ninguna funcion IPP (no hay ruta #ifdef PAMPLEJUCE_IPP en
+# source/); IPP solo lo usaba JUCE para FFT. Sin este include, las 3
+# plataformas compilan JUCE-puro = misma ruta ya shippeada en arm64 + Windows.
+# include(PamplejuceIPP)
 
 # Everything related to the tests target
 include(Tests)
