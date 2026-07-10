@@ -6,11 +6,10 @@ Este archivo lista todo el software y los datos de terceros que ORBIT usa o inco
 marca OVNI se sostiene en **honestidad verificable**: si algo de acá no se puede comprobar,
 es un bug — abrí un issue.
 
-> **Nota:** ORBIT viaja también en el DMG del catálogo (`OVNI-v0.1.0.dmg`, del repo
-> [ovniaudio/ovni](https://github.com/ovniaudio/ovni)) junto a los 6 plugins del catálogo.
-> La atribución de **Intel IPP** aparece por eso tanto acá como en el
-> [`NOTICE.md` del catálogo](https://github.com/ovniaudio/ovni/blob/main/NOTICE.md). Los 6
-> plugins OVNI **no** usan IPP; **ORBIT sí**.
+> **Nota:** ORBIT viaja también en los instaladores del catálogo (`OVNI-ORBIT-v<versión>.pkg`,
+> `OVNI-v<versión>.pkg`, el `.dmg` — del repo [ovniaudio/ovni](https://github.com/ovniaudio/ovni))
+> junto a los 6 plugins del catálogo. Desde **v0.1.1 ningún plugin — ORBIT incluido — usa
+> Intel IPP**: todas las plataformas corren JUCE puro.
 
 ---
 
@@ -40,19 +39,12 @@ El `LICENSE` de la raíz ya es el texto oficial completo de la AGPLv3.
 - **Uso en el proyecto:** framework de audio/UI del plugin (`juce_audio_processors`,
   `juce_dsp`, `juce_gui_basics`, etc.).
 
-### Intel Integrated Performance Primitives (IPP)
-- **Origen / autor:** Intel Corporation — <https://www.intel.com/content/www/us/en/developer/tools/oneapi/ipp.html>
-- **Versión:** IPP 2021.9.x (librerías estáticas redistribuibles de Intel para macOS
-  x86_64; configurado en `cmake/PamplejuceIPP.cmake`).
-- **Licencia / términos:** IPP se redistribuye bajo la licencia propietaria de Intel (Intel
-  Simplified Software License / términos de redistribución de oneAPI), que permite incluir
-  las librerías estáticas ya compiladas dentro de un producto binario. No reproducimos acá
-  el texto de esa licencia; consultar los términos oficiales de Intel para el detalle.
-- **Uso en el proyecto:** **dependencia binaria de ORBIT** para acelerar DSP. IPP es
-  **x86_64 únicamente**: en el binario universal, las rutinas de IPP se compilan y enlazan
-  **estáticamente sólo en la porción Intel (x86_64)** vía `-Xarch_x86_64` + la macro
-  `PAMPLEJUCE_IPP`; la porción **Apple Silicon (arm64) usa JUCE/sistema puro, sin IPP**. Al
-  enlazarse estáticamente, el usuario final **no** necesita tener IPP instalado.
+### Intel IPP — ya no se usa (histórico ≤ v0.1.0)
+- **Desde v0.1.1 ORBIT no enlaza Intel IPP** (ni ninguna otra librería propietaria): todas
+  las plataformas compilan JUCE puro — el `include(PamplejuceIPP)` quedó deshabilitado en el
+  `CMakeLists.txt` (ver notas del release v0.1.1). Hasta v0.1.0, IPP se enlazaba estáticamente
+  sólo en la porción x86_64 del binario universal; esa atribución se retiró junto con la
+  dependencia.
 
 ### melatonin_inspector
 - **Origen / autor:** Sudara Williams — <https://github.com/sudara/melatonin_inspector>
@@ -123,8 +115,7 @@ Estas tipografías se incluyen en `assets/fonts/` y se embeben en el binario par
 
 - **Impulse Responses (IRs):** sólo IRs propias o CC0 / permisivas. Nunca IRs extraídas de
   productos comerciales.
-- **Intel IPP** se enlaza estáticamente sólo en la porción x86_64 y se redistribuye conforme
-  a los términos de redistribución de Intel; no se modifica ni se reempaqueta su fuente.
+- **Intel IPP**: eliminado en v0.1.1 — ya no se enlaza en ninguna plataforma.
 - **La HRIR horneada** deriva de **CIPIC subject 003** (dominio público para investigación,
   con atribución a los autores); el SOFA no se commitea (vive fuera del repo).
 
