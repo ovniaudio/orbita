@@ -97,8 +97,16 @@ Estas tipografías se incluyen en `assets/fonts/` y se embeben en el binario par
 ### CIPIC HRTF Database — subject 003  ← **HRIR horneada en ORBIT**
 - **Origen / autor:** CIPIC Interface Laboratory, U.C. Davis — V. R. Algazi, R. O. Duda,
   D. M. Thompson, C. Avendano. <https://www.ece.ucdavis.edu/cipic/>
-- **Licencia / términos:** distribución libre, de **dominio público para investigación**;
-  pide atribución a los autores.
+- **Aviso de copyright — reproducirlo es condición de la licencia:**
+
+  > Copyright (c) 2001 The Regents of the University of California. All Rights Reserved
+
+- **Licencia / términos:** el apartado *"Use of Materials"* del `read_me.txt` del dataset permite
+  usar los materiales *"for any purpose-educational, research or commercial"*, con la **condición**
+  de reproducir ese aviso de copyright. No es dominio público ni está limitado a investigación:
+  es un permiso amplio con obligación de atribución, que este archivo cumple.
+- **Cortesía prevista por los mismos términos:** avisar por escrito a CIPIC cuando el uso es
+  comercial. Ese aviso queda a cargo de Joaquín Cerrano (OVNI Audio), fuera del código.
 - **Cita:** V. R. Algazi, R. O. Duda, D. M. Thompson, C. Avendano, *"The CIPIC HRTF
   Database"*, Proc. 2001 IEEE Workshop on Applications of Signal Processing to Audio
   and Acoustics (WASPAA), pp. 99–102, 2001.
@@ -116,8 +124,9 @@ Estas tipografías se incluyen en `assets/fonts/` y se embeben en el binario par
 - **Impulse Responses (IRs):** sólo IRs propias o CC0 / permisivas. Nunca IRs extraídas de
   productos comerciales.
 - **Intel IPP**: eliminado en v0.1.1 — ya no se enlaza en ninguna plataforma.
-- **La HRIR horneada** deriva de **CIPIC subject 003** (dominio público para investigación,
-  con atribución a los autores); el SOFA no se commitea (vive fuera del repo).
+- **La HRIR horneada** deriva de **CIPIC subject 003**: sus términos permiten el uso comercial
+  a condición de reproducir el aviso `Copyright (c) 2001 The Regents of the University of
+  California. All Rights Reserved` (ver arriba); el SOFA no se commitea (vive fuera del repo).
 
 ---
 
