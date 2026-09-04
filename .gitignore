@@ -33,3 +33,5 @@ cmake-build-release
 cmake-build-relwithdebinfo
 packaging/Output/*build-release/
 build-universal/
+# cualquier build fuera de source (build-03, build-analisis, ...)
+/build-*/
