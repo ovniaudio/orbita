@@ -22,7 +22,7 @@ own. · **[ovniaudio.com](https://ovniaudio.com)**
 ## What it does
 
 - **The radar** — drag to place the source in 3D: angle and distance, the whole field on one screen.
-- **Real Doppler** — pitch emerges from a modulated propagation delay as the source flies close then far. Zero latency, no pitch-shifter.
+- **Real Doppler** — pitch emerges from a modulated propagation delay as the source flies close then far. No pitch-shifter.
 - **Rate / Speed** — free (0.05–8 Hz), tempo-synced (1/4–1 bar), or fixed placement with FIXED ANGLE.
 - **Chaos** — erratic, alien motion: darting speed and azimuth wobble.
 - **Width / Room** — ear-shadow width plus decorrelated early reflections that push the sound outside your head.
@@ -35,11 +35,14 @@ ORBIT is the conservative, pure binaural core — no tricks, just acoustics:
 - **Variable-position HRIR spatializer** — two bracketing voices crossfade with fractional-delay ITD, so the source moves without clicks.
 - **Near-field (Duda–Martens)** — under a metre, bass bloom and asymmetric ear-shadow. The source gets intimate.
 - **Externalization** — decorrelated early reflections lower interaural coherence, so sound leaves your head.
-- **Speakers (RACE)** — latency-free crosstalk cancellation; IN PHASE drops it for guaranteed mono.
-- **Clip-safe** — a zero-latency, stereo-linked sample-peak limiter (ceiling 0.85) holds the output; measured true-peak sits around −1.2 dBFS and the image never breaks.
+- **Speakers (RACE)** — crosstalk cancellation that adds no delay of its own; IN PHASE drops it for guaranteed mono.
+- **Clip-safe** — a stereo-linked sample-peak limiter with no lookahead (ceiling 0.85) holds the output; measured true-peak sits around −1.2 dBFS and the image never breaks.
+- **Latency** — ORBIT reports **424 samples at 48 kHz (8.83 ms)** and the host compensates it exactly. The figure is constant: it does not change with the DOPPLER knob, and the dry path is delayed by the same amount, so a partial MIX blends two aligned copies instead of comb-filtering against itself. It scales with sample rate (it is the ITD floor plus the propagation line's centre, both in samples).
 
 The baked HRIR derives from **CIPIC subject 003** (see [`NOTICE.md`](NOTICE.md) for the full
-dataset attribution).
+dataset attribution). Its interaural time difference is rebuilt from a spherical-head model
+(Woodworth, 8.75 cm): CIPIC's own delay field is measured on an interaural-polar grid that does not
+survive the conversion to a horizontal ring.
 
 ## Install
 
