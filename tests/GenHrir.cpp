@@ -13,6 +13,8 @@
 #include <complex>
 #include <juce_dsp/juce_dsp.h>
 
+#include "helpers/itd_estimator.h"
+
 extern "C" {
 #include <mysofa.h>
 }
@@ -300,6 +302,79 @@ TEST_CASE ("generar HrirRing.h (anillo 72 azimuts, elev 0)", "[genring]")
         WARN ("DFE cut-only: rawMaxMag=" << rawMaxMag << " newMaxMag=" << newMaxMag
               << " | rawMaxL1=" << rawMaxL1 << " newMaxL1=" << newMaxL1
               << " safeGain=" << safeGain);
+    }
+
+    // -------------------------------------------------------------------------------
+    // CAMPO DE DELAY = ITD DE WOODWORTH  (ronda 0.3 — arregla el cue temporal)
+    //
+    // Los delays que libmysofa devuelve para este SOFA no son un ITD utilizable. CIPIC está
+    // medido en coordenadas inter-aurales-polares (azimut sólo −80°…+80°, sin ±90°), y en esa
+    // grilla la conversión entrega un campo con el MÍNIMO en los costados y el MÁXIMO al frente
+    // y atrás: es un patrón de tiempo de llegada al CENTRO de la cabeza, no un retardo por oído.
+    // La simetrización de más arriba conserva el ITD sólo si el original es antisimétrico; como
+    // no lo es, lo promedia contra sí mismo y lo colapsa. Medido sobre el bake de v0.2.1:
+    // ±90.7 µs (el 14 % de una cabeza real) y con el signo INVERTIDO en todo el lado izquierdo.
+    //
+    // Lo reemplazamos por el ITD de una cabeza esférica (Woodworth):
+    //     ITD(θ) = a/c · (θ + sin θ)      a = 8.75 cm,  c = 343 m/s,   0 ≤ θ ≤ 90°
+    // REFLEJADO arriba de 90° (θ → 180° − θ): atrás, en el plano medio, los dos oídos vuelven a
+    // estar equidistantes, así que el ITD baja a 0 en 180° (cono de confusión). Sin reflejar, la
+    // fórmula seguiría creciendo hasta 180°, que no es físico.
+    //
+    // Se toca SÓLO el campo de delay. Las magnitudes min-fase de CIPIC quedan intactas → el
+    // timbre y el ILD no cambian ni un dB por este paso.
+    //
+    // PISO = 2 muestras: es el mínimo al que el kernel de 4 puntos de Lagrange3rd de JUCE queda
+    // CENTRADO. En updateInternalVariables(), si delayFrac < 2 y delayInt ≥ 1, JUCE resta 1 al
+    // entero y suma 1 a la fracción; con delay = 2 eso deja delayInt = 1 y delayFrac = 1, o sea
+    // el punto de interpolación entre el 2º y el 3er tap de los 4. Por debajo de 2 el kernel se
+    // corre hacia adelante y el primer tap cae sobre la posición de ESCRITURA (muestra vieja).
+    // Bonus: en delay entero exacto los coeficientes colapsan a (0, 1, 0, 0) → passthrough.
+    {
+        constexpr double kHeadRadiusM = 0.0875;
+        constexpr double kSoundC      = 343.0;
+        constexpr float  kBaseSamples = 2.0f;
+
+        auto woodworthSamples = [&] (double azDeg)
+        {
+            double a = std::fmod (azDeg, 360.0);
+            if (a > 180.0) a -= 360.0;
+            const double sgn = (a >= 0.0) ? 1.0 : -1.0;
+            double m = std::abs (a);
+            if (m > 90.0) m = 180.0 - m;                 // reflexión: cono de confusión
+            const double th = m * 3.14159265358979324 / 180.0;
+            return sgn * (kHeadRadiusM / kSoundC) * (th + std::sin (th)) * (double) sr;
+        };
+
+        // El campo de delay NO es el ITD total: es el ITD EXCEDENTE sobre el que ya trae la
+        // magnitud. Las IRs min-fase de este bake no son neutras en el tiempo — el oído lejano
+        // está filtrado por la sombra de la cabeza (un low-pass), y un low-pass de fase mínima
+        // tiene retardo de grupo positivo, así que la magnitud sola ya adelanta el oído cercano.
+        // Medido end-to-end sobre v0.3 con el campo puesto en Woodworth crudo, ese aporte llega
+        // a +221 µs en az 50° — la mitad del Woodworth de ese ángulo. Sumarle el Woodworth
+        // entero encima lo cuenta DOS VECES (el ITD medido daba hasta 53 % de más).
+        //
+        // Así que descomponemos como corresponde:
+        //      ITD_total(d) = ITD_minfase(d) + ITD_excedente(d)   →   campo = Woodworth − ITD_minfase
+        //
+        // ITD_minfase se mide con el MISMO estimador que usa el test de aceptación (correlación
+        // cruzada interaural limitada a 1.5 kHz y sobremuestreada ×16): así el criterio con el
+        // que se hornea y el criterio con el que se verifica son el mismo, sin ajustar a ojo.
+        double worstMin = 0.0; int worstMinDir = 0;
+        for (int d = 0; d < kNumDirs; ++d)
+        {
+            const double az     = (double) d * (double) kStepDeg;
+            const double target = woodworthSamples (az);                                  // ITD total que queremos
+            const double already = orbita_test::itdSamples (&ringL[(size_t) d * taps], &ringR[(size_t) d * taps], taps, (double) sr);
+            const double tau    = target - already;                                       // lo que falta poner
+            delayL[(size_t) d] = kBaseSamples + (float) std::max (0.0, -tau);
+            delayR[(size_t) d] = kBaseSamples + (float) std::max (0.0,  tau);
+            if (std::abs (already) > std::abs (worstMin)) { worstMin = already; worstMinDir = d; }
+        }
+        WARN ("Campo de delay = Woodworth - ITD_minfase. Objetivo a 90 deg: "
+              << woodworthSamples (90.0) / sr * 1.0e6 << " us | ITD que ya trae la magnitud: max "
+              << worstMin / sr * 1.0e6 << " us en az " << (worstMinDir * kStepDeg)
+              << " deg | piso del campo " << kBaseSamples << " muestras");
     }
 
     const std::string path = std::string (ORBITA_REPO_DIR) + "/source/dsp/HrirRing.h";

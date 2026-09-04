@@ -2,6 +2,8 @@
 // debe quedar acotado, y no debe clickear (sin saltos groseros) al orbitar. Más tests
 // del cerebro Órbitas (free-run, sync al tempo, dirección).
 #include <catch2/catch_test_macros.hpp>
+
+#include "helpers/itd_estimator.h"
 #include <dsp/SpatialEngine.h>
 #include <dsp/OrbitBrain.h>
 #include <dsp/HrirRing.h>
@@ -1008,18 +1010,25 @@ TEST_CASE ("NEAR-FIELD: caracterización completa (mediciones objetivas)", "[nea
                 const auto* oL = buf.getReadPointer (0); const auto* oR = buf.getReadPointer (1);
                 for (int i = 0; i < block && got < cap; ++i) { hL[(size_t)got]=oL[i]; hR[(size_t)got]=oR[i]; ++got; }
             }
-            int pL = 0, pR = 0; float mL = 0, mR = 0;
-            for (int i = 0; i < cap; ++i)
-            {
-                if (std::abs (hL[(size_t)i]) > mL) { mL = std::abs (hL[(size_t)i]); pL = i; }
-                if (std::abs (hR[(size_t)i]) > mR) { mR = std::abs (hR[(size_t)i]); pR = i; }
-            }
-            return pR - pL; // el oído lejano (R, fuente a la izq) llega después -> pR > pL
+            // Desde la ronda 0.3 el ITD real vale ~31 muestras a 90°, así que el pico entero de
+            // |h| ya resuelve el borde de muestra y lo cruza por el desbalance espectral que el
+            // propio near-field introduce. Medimos con el estimador perceptual (IACC-LP ×16, el
+            // mismo de [fidelity] y del horneado) en vez del pico: el pico se mueve con la FORMA
+            // del impulso, el ITD que se escucha no.
+            return orbita_test::itdSamples (hL.data(), hR.data(), cap, sr);
         };
-        const int itdNear = captureITD (0.05f), itdFar = captureITD (0.95f);
-        WARN ("== (E) ITD a 90 izq (samples @48k, pico R - pico L): cerca=" << itdNear << "  lejos=" << itdFar
-              << "  (el near-field NO toca el delay) ==");
-        REQUIRE (itdNear == itdFar);  // ITD idéntico cerca/lejos: no se modula con la distancia
+        const double itdNear = captureITD (0.05f), itdFar = captureITD (0.95f);
+        WARN ("== (E) ITD a 90 izq (muestras @48k, IACC-LP): cerca=" << itdNear << "  lejos=" << itdFar
+              << "  delta=" << std::abs (itdNear - itdFar) * 1.0e6 / sr << " us (el near-field NO toca el delay) ==");
+        // El near-field no MODULA el ITD con la distancia. No da exactamente cero: su low-shelf
+        // asimétrico (Duda-Martens: boost en un oído, cut en el otro) es de fase mínima, y cada
+        // ganancia trae su propio retardo de grupo. Medido entre los dos extremos del knob Radio:
+        // 10.7 µs, el 1.6 % del ITD de ese ángulo — coherente con el propio Duda-Martens, que
+        // encuentra el ITD casi independiente del rango, no exactamente independiente.
+        // El límite es el JND de ITD (~20 µs): abajo de eso el Radio cambia la DISTANCIA sin
+        // correr la posición. Es además la resolución efectiva que ya tenía este test antes de
+        // la ronda 0.3, cuando comparaba dos picos enteros (1 muestra @48k = 20.8 µs).
+        REQUIRE (std::abs (itdNear - itdFar) * 1.0e6 / sr < 20.0);
     }
 }
 

@@ -28,6 +28,7 @@
 #include <vector>
 
 #include <PluginProcessor.h>
+#include "helpers/itd_estimator.h"
 
 namespace
 {
@@ -115,66 +116,17 @@ void fixedSource (PluginProcessor& p, float azDeg, float dopplerPct = 0.0f, floa
 }
 
 //======================================================================================
-// ITD por correlación cruzada interaural, sobremuestreada ×16 y limitada a 1.5 kHz.
-//
-// Por qué band-limitada: es el estimador estándar de la literatura (IACC-LP, cf. Katz &
-// Noisternig 2014). Arriba de ~1.5 kHz la fase interaural es ambigua (la longitud de onda
-// es menor que la cabeza) y el pabellón mete retardos de grupo propios que no son ITD. Es
-// además la banda donde el ITD manda perceptualmente.
-//
-// Por qué ×16 sobremuestreada: 1/16 de muestra = 1.3 µs, dos órdenes por debajo del JND
-// de ITD (~20 µs) y suficiente para el test de antisimetría (< 5 µs).
-//
-// Devuelve el ITD en MICROSEGUNDOS, con la convención ITD = retardo_R − retardo_L.
+// ITD end-to-end. El estimador (IACC-LP ×16) vive en helpers/itd_estimator.h porque es el
+// MISMO que usa el horneado del anillo para descontar el ITD de la magnitud min-fase: si el
+// criterio con el que se hornea y el criterio con el que se verifica se separan, el bake
+// queda ajustado contra un número que ningún test mira.
 //======================================================================================
-constexpr int kCorrOrder = 12;                 // 4096 muestras de ventana
-constexpr int kCorrN     = 1 << kCorrOrder;
-constexpr int kCorrUp    = 16;
-constexpr int kCorrBigN  = kCorrN * kCorrUp;
+constexpr int kWin = 4096;      // ventana de análisis (cubre el HRIR + la latencia del wet)
 
 double itdMicros (const std::vector<float>& l, const std::vector<float>& r, int from)
 {
-    using C = std::complex<float>;
-    static juce::dsp::FFT fft    (kCorrOrder);
-    static juce::dsp::FFT fftBig (kCorrOrder + 4);   // 65536
-
-    std::vector<C> a ((size_t) kCorrN, C {}), b ((size_t) kCorrN, C {});
-    for (int i = 0; i < kCorrN; ++i)
-    {
-        const size_t s = (size_t) (from + i);
-        if (s < l.size()) { a[(size_t) i] = C { l[s], 0.0f }; b[(size_t) i] = C { r[s], 0.0f }; }
-    }
-    std::vector<C> A ((size_t) kCorrN), B ((size_t) kCorrN);
-    fft.perform (a.data(), A.data(), false);
-    fft.perform (b.data(), B.data(), false);
-
-    // Espectro cruzado conj(A)·B, cero arriba de 1.5 kHz, insertado en un buffer ×16
-    // (zero-padding en frecuencia = interpolación sinc exacta en el dominio del lag).
-    const int kMaxBin = (int) std::floor (1500.0 / (SR / (double) kCorrN));
-    std::vector<C> S ((size_t) kCorrBigN, C {});
-    for (int k = 1; k <= kMaxBin; ++k)
-    {
-        const C c = std::conj (A[(size_t) k]) * B[(size_t) k];
-        S[(size_t) k]                  = c;
-        S[(size_t) (kCorrBigN - k)]    = std::conj (c);
-    }
-    std::vector<C> c ((size_t) kCorrBigN);
-    fftBig.perform (S.data(), c.data(), true);
-
-    // Buscar el pico dentro de ±64 muestras (el ITD físico máximo es ~31).
-    const int span = 64 * kCorrUp;
-    int   best = 0;
-    float bestV = -1.0e30f;
-    auto at = [&] (int i) { return c[(size_t) ((i % kCorrBigN + kCorrBigN) % kCorrBigN)].real(); };
-    for (int i = -span; i <= span; ++i)
-        if (at (i) > bestV) { bestV = at (i); best = i; }
-
-    // Refinamiento parabólico sobre la grilla ×16.
-    const float ym = at (best - 1), y0 = at (best), yp = at (best + 1);
-    const float den = ym - 2.0f * y0 + yp;
-    const double frac = (std::abs (den) > 1.0e-20f) ? (double) (0.5f * (ym - yp) / den) : 0.0;
-
-    return ((double) best + frac) / (double) kCorrUp / SR * 1.0e6;
+    return orbita_test::itdMicros (l.data() + from, r.data() + from,
+                                   (int) juce::jmin ((size_t) kWin, l.size() - (size_t) from), SR);
 }
 
 // Primer arribo: primera muestra que supera −40 dB del pico. Para un FIR de fase mínima
@@ -196,17 +148,17 @@ double firstArrival (const std::vector<float>& v, int from, int len)
 double bandDb (const std::vector<float>& v, int from, double lo, double hi)
 {
     using C = std::complex<float>;
-    static juce::dsp::FFT fft (kCorrOrder);
-    std::vector<C> in ((size_t) kCorrN, C {}), out ((size_t) kCorrN);
-    for (int i = 0; i < kCorrN; ++i)
+    static juce::dsp::FFT fft (12);
+    std::vector<C> in ((size_t) kWin, C {}), out ((size_t) kWin);
+    for (int i = 0; i < kWin; ++i)
     {
         const size_t s = (size_t) (from + i);
         if (s < v.size()) in[(size_t) i] = C { v[s], 0.0f };
     }
     fft.perform (in.data(), out.data(), false);
-    const double binHz = SR / (double) kCorrN;
+    const double binHz = SR / (double) kWin;
     double acc = 0.0; int cnt = 0;
-    for (int k = 1; k <= kCorrN / 2; ++k)
+    for (int k = 1; k <= kWin / 2; ++k)
     {
         const double f = (double) k * binHz;
         if (f >= lo && f < hi) { acc += (double) std::norm (out[(size_t) k]); ++cnt; }
@@ -231,7 +183,7 @@ const Sweep& sweep()
         // Pre-roll de silencio: deja asentar los suavizados (near-field, width, air, Doppler)
         // antes del impulso. "Impulso a régimen", como pide el informe 21.
         constexpr int kPre = 12288;                 // 0.256 s
-        constexpr int kLen = kPre + kCorrN + 2048;
+        constexpr int kLen = kPre + kWin + 2048;
         std::vector<float> imp ((size_t) kLen, 0.0f);
         imp[(size_t) kPre] = 1.0f;
 
@@ -350,7 +302,7 @@ TEST_CASE ("ORBIT fidelidad: ILD por banda con signo correcto", "[fidelity]")
     };
 
     constexpr int kPre = 12288;
-    constexpr int kLen = kPre + kCorrN + 2048;
+    constexpr int kLen = kPre + kWin + 2048;
     std::vector<float> imp ((size_t) kLen, 0.0f);
     imp[(size_t) kPre] = 1.0f;
 
