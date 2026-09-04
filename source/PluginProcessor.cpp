@@ -131,6 +131,17 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     brain.prepare (sampleRate);
     lowCut.prepare (spec);
     hiCut.prepare (spec);
+
+    // LATENCIA. El motor arrastra dos retardos PUROS en el camino wet: el piso del campo de ITD
+    // del anillo y el centro de la línea de Doppler (que desde 0.3 corre siempre, para que la
+    // latencia no dependa de una perilla en vivo). Son constantes, así que se pueden declarar, y
+    // el seco pasa por un retardo igual dentro del motor -> seco y wet salen alineados y el host
+    // compensa el conjunto con PDC exacto. Hasta v0.2.1 esto no se reportaba: el wet salía 9.43 ms
+    // tarde y el material se peinaba contra el resto de la mezcla en cualquier send paralelo.
+    // NO incluye el retardo de grupo del propio HRIR: eso es coloración del filtro, no latencia
+    // (tampoco se reporta la de un EQ).
+    setLatencySamples (engine.latencySamples());
+
     prevInGain  = juce::Decibels::decibelsToGain (apvts.getRawParameterValue ("inGain")->load());
     prevOutGain = juce::Decibels::decibelsToGain (apvts.getRawParameterValue ("output")->load());
 }

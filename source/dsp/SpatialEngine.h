@@ -30,6 +30,14 @@ public:
     void prepare (const juce::dsp::ProcessSpec& spec);
     void reset();
 
+    // Latencia CONSTANTE del motor, en muestras (válida después de prepare). Es la suma de los
+    // dos retardos PUROS del camino wet: el piso del campo de ITD del anillo + el centro de la
+    // línea de Doppler, que ahora corre siempre (ver SpatialEngine.cpp). No incluye el retardo
+    // de grupo del propio HRIR, que es coloración del filtro y no latencia — igual que no se
+    // reporta la de un EQ. El camino seco pasa por un retardo de exactamente esta cantidad, así
+    // que seco y wet salen alineados y el host puede compensar con PDC exacto.
+    int latencySamples() const noexcept { return latencyInSamples; }
+
     // Parámetros de un bloque de proceso. Designated-init en el call site (C++20).
     //   azimuthRad: objetivo al FINAL del bloque (0 = frente, + = CCW / izquierda).
     //   mix01: 0 = seco (centro) .. 1 = efectado (binaural).
@@ -49,7 +57,11 @@ public:
         float radius01    = 0.5f;
         bool  speakerMode = false;
         float distance01  = -1.0f;  // distancia INSTANTANEA modulada (fly-by). <0 => usar radius01 (sin Doppler)
-        float doppler01   = 0.0f;   // 0..1: cantidad de Doppler (bypass de la linea si 0)
+        float doppler01   = 0.0f;   // 0..1: cantidad de Doppler. Lo aplica el CEREBRO (modula
+                                    // distance01); desde 0.3 el motor no lo lee — la línea de
+                                    // Doppler corre siempre por su centro, para que la latencia
+                                    // no dependa de una perilla. Se conserva en la API porque
+                                    // describe el contrato y lo setean los tests y el editor.
         float elevation01 = 0.0f;   // -1..+1: altura (HEIGHT). >0 = arriba (más aire/brillo), <0 = abajo (más oscuro)
     };
 
@@ -100,6 +112,13 @@ private:
 
     juce::AudioBuffer<float> mono, w0L, w0R, w1L, w1R; // scratch mono (1 canal c/u)
     juce::AudioBuffer<float> dryBuf;                    // seco = entrada original (estéreo)
+
+    // Retardo del SECO = latencyInSamples, entero y sin interpolar -> bit-exacto. Alinea el seco
+    // con el wet, así MIX intermedio mezcla dos copias en fase en vez de peinarse contra sí mismo.
+    using DryLine = juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::None>;
+    DryLine dryDelay { 2048 };
+    int     latencyInSamples = 0;
+    float   ringBaseSamples  = 0.0f;                    // piso del campo de ITD, ya al SR de sesión
     Reflections space;                                  // reflexiones tempranas (externalización)
     Crosstalk   xtalk;                                  // cancelación de crosstalk (modo Parlantes)
 

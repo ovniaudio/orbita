@@ -46,6 +46,9 @@ static void resampleIR (const float* in, int inLen, float* out, int outLen, doub
     }
 }
 
+// Retardo mínimo al que el kernel de 4 puntos de Lagrange3rd queda centrado (ver prepare()).
+static constexpr float kItdFloorSamples = 2.0f;
+
 void SpatialEngine::prepare (const juce::dsp::ProcessSpec& spec)
 {
     // Robustez de sample rate: el anillo se horneó a kRingSampleRate; si la sesión corre
@@ -80,8 +83,23 @@ void SpatialEngine::prepare (const juce::dsp::ProcessSpec& spec)
         }
         dlyL[(size_t) d] = (float) (kRingDelayL[(size_t) d] * ratio);
         dlyR[(size_t) d] = (float) (kRingDelayR[(size_t) d] * ratio);
-        maxDelay = juce::jmax (maxDelay, dlyL[(size_t) d], dlyR[(size_t) d]);
     }
+
+    // Piso del campo de ITD. El anillo se hornea con el mínimo en 2 muestras, que es el retardo
+    // más chico al que el kernel de 4 puntos de Lagrange3rd queda CENTRADO (JUCE resta 1 al entero
+    // si delayFrac < 2 y delayInt >= 1; con delay = 2 quedan delayInt = 1 y delayFrac = 1). A otro
+    // sample rate el escalado corre ese piso, así que lo volvemos a anclar en 2. El desplazamiento
+    // es COMÚN a las 72 direcciones y a los dos oídos: el ITD, que es una DIFERENCIA, no cambia —
+    // lo único que se fija es la latencia base, que es exactamente lo que queremos poder declarar.
+    {
+        float minDly = dlyL[0];
+        for (int d = 0; d < kNumDirs; ++d) minDly = juce::jmin (minDly, dlyL[(size_t) d], dlyR[(size_t) d]);
+        const float lift = kItdFloorSamples - minDly;
+        for (int d = 0; d < kNumDirs; ++d) { dlyL[(size_t) d] += lift; dlyR[(size_t) d] += lift; }
+        ringBaseSamples = kItdFloorSamples;
+    }
+    for (int d = 0; d < kNumDirs; ++d)
+        maxDelay = juce::jmax (maxDelay, dlyL[(size_t) d], dlyR[(size_t) d]);
 
     const int maxDelaySamples = (int) std::ceil (maxDelay) + 4;
     const juce::dsp::ProcessSpec monoSpec { spec.sampleRate, spec.maximumBlockSize, 1 };
@@ -111,10 +129,19 @@ void SpatialEngine::prepare (const juce::dsp::ProcessSpec& spec)
     limRelCoef = 1.0f - (float) std::exp (-1.0 / (0.001 * (double) limTune.releaseMs * spec.sampleRate)); // release del limiter
 
     // Doppler: dimensionar la linea de delay modulado. center = headroom (maxAmp + piso); maxDelay = 2*center.
+    // El centro se REDONDEA A ENTERO a propósito: en un retardo entero los coeficientes de
+    // Lagrange3rd colapsan a (0, 1, 0, 0), así que en reposo la línea es passthrough bit-exacto y
+    // no colorea. Es lo que permite dejarla siempre encendida sin pagar nada de timbre.
     dopplerMaxAmpSamples = (float) (dopplerTune.maxAmpMeters * spec.sampleRate / kSoundC);
-    dopplerCenterSamples = dopplerMaxAmpSamples + dopplerTune.minSafeSamples;
+    dopplerCenterSamples = std::round (dopplerMaxAmpSamples + dopplerTune.minSafeSamples);
     dopplerLine.setMaximumDelayInSamples (juce::jmax (4, (int) std::ceil (2.0f * dopplerCenterSamples) + 4));
     dopplerLine.prepare (monoSpec);
+
+    // Latencia = los dos retardos PUROS del wet, y el seco se retrasa lo mismo para quedar alineado.
+    latencyInSamples = (int) std::lround (ringBaseSamples + dopplerCenterSamples);
+    dryDelay.setMaximumDelayInSamples (latencyInSamples + 4);
+    dryDelay.prepare (juce::dsp::ProcessSpec { spec.sampleRate, spec.maximumBlockSize, 2 });
+    dryDelay.setDelay ((float) latencyInSamples);
 
     reset();
 }
@@ -125,6 +152,12 @@ void SpatialEngine::reset()
     mono.clear(); w0L.clear(); w0R.clear(); w1L.clear(); w1R.clear(); dryBuf.clear();
     space.reset();
     xtalk.reset();
+    dryDelay.reset();
+    dryDelay.setDelay ((float) latencyInSamples);
+    // La línea de Doppler arranca YA en su centro: si arrancara en 0 tardaría ~44 ms en rampear
+    // hasta ahí (el slew-limit es 0.20 muestras/muestra) y durante ese tramo la latencia real no
+    // sería la declarada.
+    dopplerDelayPrev = dopplerCenterSamples;
     bassLpL = bassLpR = 0.0f;
     airLpL = airLpR = 0.0f;
     directGainSm = 1.0f;
@@ -238,19 +271,24 @@ void SpatialEngine::process (juce::AudioBuffer<float>& buffer, int numInputChann
 
     // 0) capturar el SECO = entrada original (preserva el estéreo; mono -> centrado).
     //    Se usa en el mix seco/efectado; así bajar Mix recupera la señal original.
-    // NOTA (limitación conocida, aceptada): el seco se captura con delay 0, mientras el wet
-    //    arrastra el delay de propagación del Doppler (~dopplerCenterSamples ≈ 8.8 ms @48k). Con
-    //    Doppler>0 y Mix<100% eso produce un comb (flanger) entre seco y wet. NO se corrige
-    //    retardando el seco: (a) agregaría latencia no reportada a toda la pista (no hay PDC/
-    //    setLatencySamples y Doppler es una perilla en vivo -> la latencia no se puede reportar
-    //    estáticamente), y (b) el delay del wet es variable, así que sólo se alinearía el cruce
-    //    az=±90° y volvería el flanger en movimiento. Es físicamente plausible (fly-by = directo +
-    //    arribo retardado) y el wet está decorrelado (HRIR+reflexiones+ILD) -> el comb es coloración
-    //    leve, no cancelación. Bypass real a Doppler=0 -> sin comb en el uso normal.
+    //    El seco pasa por un retardo ENTERO de latencyInSamples, que es exactamente lo que el wet
+    //    arrastra de retardo puro (piso del ITD + centro de la línea de Doppler). Antes el seco
+    //    salía a retardo 0 contra un wet a ~9.4 ms: a MIX intermedio el plugin se peinaba consigo
+    //    mismo (comb con el primer notch en ~53 Hz), y como la latencia no se reportaba, mandar
+    //    ORBIT por un send paralelo peinaba la señal contra el resto de la mezcla. Ahora los dos
+    //    caminos salen alineados y el host compensa el conjunto con PDC exacto.
+    //    Interpolación None -> el seco sigue siendo BIT-EXACTO, sólo que corrido.
     auto* dryL = dryBuf.getWritePointer (0);
     auto* dryR = dryBuf.getWritePointer (1);
     juce::FloatVectorOperations::copy (dryL, buffer.getReadPointer (0), n);
     juce::FloatVectorOperations::copy (dryR, buffer.getReadPointer (juce::jmin (numIn > 1 ? 1 : 0, bufCh - 1)), n);
+    for (int i = 0; i < n; ++i)
+    {
+        dryDelay.pushSample (0, dryL[i]);
+        dryDelay.pushSample (1, dryR[i]);
+        dryL[i] = dryDelay.popSample (0);
+        dryR[i] = dryDelay.popSample (1);
+    }
 
     // 1) suma a mono (punto sonoro) -> alimenta el espacializador
     auto* m = mono.getWritePointer (0);
@@ -261,12 +299,16 @@ void SpatialEngine::process (juce::AudioBuffer<float>& buffer, int numInputChann
         juce::FloatVectorOperations::multiply (m, 1.0f / (float) numIn, n);
 
     // 1b) DOPPLER: delay de propagacion mono modulado por la velocidad radial del fly-by. El pitch
-    //     emerge de variar el delay (sin pitch-shifter -> latencia 0). Centro = headroom; sólo la
-    //     DERIVADA del delay produce pitch, así el offset no agrega latencia perceptible. Bypass a
-    //     doppler=0 (distance==radius) -> idéntico a hoy. Rampa por-sample = continuidad C0 (anti-click).
+    //     emerge de variar el delay (sin pitch-shifter). Rampa por-sample = continuidad C0 (anti-click).
+    //
+    //     La linea corre SIEMPRE, tambien con DOPPLER = 0, y en reposo se queda EN SU CENTRO. Antes
+    //     se salteaba por completo, y eso hacia que la latencia del wet dependiera de la perilla:
+    //     0.65 ms con Doppler 0 y 9.43 ms con Doppler > 0, ninguna de las dos reportada. Dejarla
+    //     encendida no cuesta timbre porque el centro es ENTERO y en retardo entero el kernel de
+    //     Lagrange3rd colapsa a (0, 1, 0, 0) -> passthrough bit-exacto. A cambio la latencia pasa a
+    //     ser CONSTANTE, y una latencia constante se puede declarar y compensar; una que cambia con
+    //     una perilla en vivo, no.
     const float distInst01 = (p.distance01 < 0.0f) ? radius01 : p.distance01;
-    const bool  dopActive  = p.doppler01 > 1.0e-4f;
-    if (dopActive || dopplerDelayPrev > 1.0e-4f)
     {
         // Fly-by: el delay sigue la modulación de distancia NORMALIZADA, NO los metros exponenciales.
         // (El mapeo viejo (dBase-dInst en metros)·SR/c llegaba a ~1900 muestras y se clampeaba a ±420 ->
@@ -274,13 +316,13 @@ void SpatialEngine::process (juce::AudioBuffer<float>& buffer, int numInputChann
         //  aplastado y asimétrico.) Acá la excursión llena la línea sin clampear: el delay rastrea la
         //  distancia de forma continua y el pitch sale suave y simétrico (cae a 0 en frente/atrás, máximo
         //  en los costados, donde la velocidad radial es máxima). + al acercarse (delay se acorta -> sube).
-        // kBrainEcc = maxEcc01 del OrbitBrain (DopplerTuning por defecto): a doppler=1 |radius01-distInst01|
-        // llega a ~0.55, que mapeamos a la amplitud máxima de la línea (sin clamp en el caso headline).
+        // kBrainEcc = maxEcc01 del OrbitBrain: a doppler=1 |radius01-distInst01| llega a ~0.55, que
+        // mapeamos a la amplitud máxima de la línea. Con doppler=0 el cerebro deja distance01 == radius01
+        // -> modSamp = 0 -> la línea se queda clavada en el centro y no hace nada más que retardar.
         constexpr float kBrainEcc = 0.55f;
         float modSamp = (radius01 - distInst01) * (dopplerMaxAmpSamples / kBrainEcc);
         modSamp = juce::jlimit (-dopplerMaxAmpSamples, dopplerMaxAmpSamples, modSamp); // red de seguridad (Spiral+Doppler extremo)
-        const float center   = dopActive ? dopplerCenterSamples : 0.0f;     // se rampea a 0 al desactivar
-        const float delayTgt = juce::jmax (dopplerTune.minSafeSamples, center - modSamp);
+        const float delayTgt = juce::jmax (dopplerTune.minSafeSamples, dopplerCenterSamples - modSamp);
         // slew-limit del delay = limita el pitch shift máximo -> anti-aliasing y suaviza el extremo:
         // a Speed × Doppler muy altos el delay no alcanza el target, el fly-by se redondea sin raspar.
         float dStep = (delayTgt - dopplerDelayPrev) / (float) n;
@@ -293,10 +335,7 @@ void SpatialEngine::process (juce::AudioBuffer<float>& buffer, int numInputChann
             m[i] = dopplerLine.popSample (0);
             delay += dStep;
         }
-        // bypass REAL: una vez apagado y asentado en el piso, soltar a 0 -> el próximo bloque saltea la
-        // línea por completo (sin los ~8.8 ms de latencia ni el timbre del Lagrange). Antes nunca volvía
-        // a cero (el piso minSafe dejaba la condición siempre verdadera) -> la línea quedaba siempre activa.
-        dopplerDelayPrev = (! dopActive && std::abs (delay - dopplerTune.minSafeSamples) < 0.5f) ? 0.0f : delay;
+        dopplerDelayPrev = delay;
     }
 
     // 2) azimut -> posición en pasos del anillo [0, kNumDirs)
