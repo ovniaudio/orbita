@@ -34,7 +34,7 @@ void Reflections::prepare (double sr, int maxBlock)
 {
     sampleRate = (sr > 0.0 ? sr : 48000.0);
 
-    int need = (int) std::ceil (0.095 * sampleRate) + std::max (maxBlock, 64) + 4;
+    int need = (int) std::ceil (kTailSeconds * sampleRate) + std::max (maxBlock, 64) + 4;
     int n = 1; while (n < need) n <<= 1;        // potencia de 2 -> máscara circular
     ring.assign ((size_t) n, 0.0f);
     mask = n - 1;

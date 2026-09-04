@@ -15,6 +15,10 @@ namespace orbita {
 class Reflections
 {
 public:
+    // Cola del campo de reflexiones: 80 ms de ventana de taps + el margen del decaimiento.
+    // Publica porque el plugin la necesita para declarar getTailLengthSeconds().
+    static constexpr double kTailSeconds = 0.095;
+
     void prepare (double sampleRate, int maxBlockSize);
     void reset();
 

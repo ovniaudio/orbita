@@ -103,7 +103,7 @@ bool PluginProcessor::isMidiEffect() const
 
 double PluginProcessor::getTailLengthSeconds() const
 {
-    return 0.0;
+    return tailSeconds;
 }
 
 // NO exponemos los 40 presets como "programs" del host: hacerlo rompe la restauración de estado de
@@ -141,6 +141,12 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     // NO incluye el retardo de grupo del propio HRIR: eso es coloración del filtro, no latencia
     // (tampoco se reporta la de un EQ).
     setLatencySamples (engine.latencySamples());
+
+    // COLA: las reflexiones tempranas (80 ms de ventana de taps + el margen del decaimiento) más
+    // la latencia que acabamos de declarar. Con 0.0 el host tenía permiso para cortar el render
+    // offline apenas termina la región, antes de que salga la cola — y para descartar el buffer
+    // de un bounce en el momento justo en que ORBIT todavía está devolviendo reflexiones.
+    tailSeconds = orbita::Reflections::kTailSeconds + (double) engine.latencySamples() / sampleRate;
 
     prevInGain  = juce::Decibels::decibelsToGain (apvts.getRawParameterValue ("inGain")->load());
     prevOutGain = juce::Decibels::decibelsToGain (apvts.getRawParameterValue ("output")->load());

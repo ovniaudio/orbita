@@ -77,6 +77,10 @@ private:
     // host: hacerlo rompía la restauración de estado de los params Bool en VST3 (visto en pluginval).
     void handleAsyncUpdate() override;
     std::atomic<int> pendingProgram { -1 };
+
+    // Cola declarada al host (reflexiones + latencia). Se recalcula en prepareToPlay.
+    double tailSeconds = orbita::Reflections::kTailSeconds;
+
     float prevInGain  = 1.0f;   // suavizado por-bloque del Input gain (anti-zipper)
     float prevOutGain = 1.0f;   // suavizado por-bloque del Output gain (anti-zipper)
 
