@@ -223,11 +223,8 @@ TEST_CASE ("generar HrirRing.h (anillo 72 azimuts, elev 0)", "[genring]")
         for (int k = 1; k < N/2; ++k) G[(size_t)(N - k)] = G[(size_t)k];
 
         // 3) por IR: |H'| = |H|*G -> IR de fase mínima (cepstrum real)
-        auto minPhase = [&] (float* ir)
+        auto fromMagnitude = [&] (const std::vector<float>& mag, float* ir)
         {
-            std::vector<float> mag; magOf (ir, mag);
-            for (int k = 0; k < N; ++k) mag[(size_t)k] *= G[(size_t)k];
-
             std::vector<C> X ((size_t) N), x ((size_t) N);
             for (int k = 0; k < N; ++k) X[(size_t)k] = C { std::log (std::max (mag[(size_t)k], 1.0e-9f)), 0.0f };
             fft.perform (X.data(), x.data(), true);
@@ -243,10 +240,53 @@ TEST_CASE ("generar HrirRing.h (anillo 72 azimuts, elev 0)", "[genring]")
             std::vector<C> h ((size_t) N); fft.perform (W.data(), h.data(), true);
             for (int i = 0; i < taps; ++i) ir[i] = h[(size_t)i].real() * invScale;
         };
+
+        // 3b) ILD DE GRAVES: abajo de 250 Hz el dato de CIPIC no existe (ronda 0.3).
+        //
+        // La HRIR mide 218 taps = 4.5 ms: no puede representar nada por debajo de ~220 Hz. Lo
+        // que el anillo trae en 63–250 Hz no es sombra de cabeza, es el residuo de truncar la
+        // medición — y sale con el signo AL REVÉS. Medido en v0.2.1, con la fuente a la
+        // izquierda: −1.8 dB a +45° y −2.7 dB a +90°, o sea el oído DERECHO más fuerte.
+        // Para un productor eso significa que un bajo, un kick o un pad grave se van al lado
+        // contrario del que muestra el radar.
+        //
+        // Debajo de fc = 250 Hz imponemos el ILD de una cabeza esférica. Para una esfera rígida
+        // el ILD tiende a 0 en continua (la longitud de onda pasa a ser mucho mayor que la
+        // cabeza y deja de haber sombra), así que interpolamos linealmente en frecuencia entre
+        // 0 dB en DC y el ILD MEDIDO en fc, que es el primer dato confiable del propio sujeto.
+        // No inventamos un número: extendemos hacia abajo el que ya está, con la forma que la
+        // física pide. Da +1…+3 dB hacia el oído cercano en las dos bandas graves.
+        //
+        // Se conserva la MEDIA GEOMÉTRICA de los dos oídos en cada bin: sólo se REPARTE el nivel
+        // entre L y R, no se agrega ni se quita energía → la suma mono no cambia de timbre.
+        const int bIldFc = juce::jmax (2, binHz (250.0));
+        auto fixLowFreqIld = [&] (std::vector<float>& mL, std::vector<float>& mR)
+        {
+            double accL = 0.0, accR = 0.0;
+            for (int k = bIldFc; k <= binHz (500.0); ++k)
+            { accL += (double) mL[(size_t)k] * mL[(size_t)k]; accR += (double) mR[(size_t)k] * mR[(size_t)k]; }
+            const double ildRefDb = 10.0 * std::log10 ((accL + 1.0e-30) / (accR + 1.0e-30));
+
+            for (int k = 0; k < bIldFc; ++k)
+            {
+                const double t      = (double) k / (double) bIldFc;      // 0 en DC, 1 en fc
+                const double halfDb = 0.5 * ildRefDb * t;
+                const float  mid    = std::sqrt (std::max (mL[(size_t)k] * mR[(size_t)k], 1.0e-30f));
+                mL[(size_t)k] = mid * (float) std::pow (10.0,  halfDb / 20.0);
+                mR[(size_t)k] = mid * (float) std::pow (10.0, -halfDb / 20.0);
+                if (k > 0) { mL[(size_t)(N - k)] = mL[(size_t)k]; mR[(size_t)(N - k)] = mR[(size_t)k]; }
+            }
+        };
+
+        std::vector<float> magL, magR;
         for (int d = 0; d < kNumDirs; ++d)
         {
-            minPhase (&ringL[(size_t) d * taps]);
-            minPhase (&ringR[(size_t) d * taps]);
+            magOf (&ringL[(size_t) d * taps], magL);
+            magOf (&ringR[(size_t) d * taps], magR);
+            for (int k = 0; k < N; ++k) { magL[(size_t)k] *= G[(size_t)k]; magR[(size_t)k] *= G[(size_t)k]; }
+            fixLowFreqIld (magL, magR);
+            fromMagnitude (magL, &ringL[(size_t) d * taps]);
+            fromMagnitude (magR, &ringR[(size_t) d * taps]);
         }
 
         // 4) SEGURIDAD DE GANANCIA: limitar la L1 máxima del anillo nuevo a la del crudo.
