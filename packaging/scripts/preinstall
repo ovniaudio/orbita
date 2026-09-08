@@ -60,16 +60,28 @@ bundle_id() { # $1 = ruta del bundle
 }
 
 retire() { # $1 = bundle · $2 = raiz del dominio
-  dest="$2/Library/Application Support/OVNI Audio/replaced/$STAMP"
+  base="$2/Library/Application Support/OVNI Audio"
+  dest="$base/replaced/$STAMP"
+  # Esto corre como root y el home lo controla el usuario: NO se sigue ningun enlace simbolico en
+  # la cadena de destino (un symlink ahi haria que root cree carpetas y mueva archivos adonde
+  # apunte el enlace). Si hay uno, se deja el bundle donde esta y se avisa.
+  for p in "$2/Library" "$2/Library/Application Support" "$base" "$base/replaced" "$dest"; do
+    if [ -L "$p" ]; then
+      log "AVISO: '$p' es un enlace simbolico — no lo sigo; dejo '$1' donde esta"
+      return 0
+    fi
+  done
   if ! mkdir -p "$dest" 2>/dev/null; then
     log "AVISO: no pude crear '$dest' — dejo '$1' donde esta"
     return 0
   fi
   if mv "$1" "$dest/" 2>/dev/null; then
     log "retirado: '$1' → '$dest/'"
-    # El cajon del usuario tiene que quedar del usuario, no de root.
+    # El cajon del usuario tiene que quedar del usuario, no de root: solo lo que este script pudo
+    # crear (OVNI Audio/replaced/<stamp>), no toda la carpeta compartida del catalogo.
     if [ -n "$2" ] && owner="$(stat -f %u:%g "$2" 2>/dev/null)"; then
-      chown -R "$owner" "$2/Library/Application Support/OVNI Audio" 2>/dev/null || true
+      chown -h "$owner" "$base" "$base/replaced" 2>/dev/null || true
+      chown -R "$owner" "$dest" 2>/dev/null || true
     fi
   else
     log "AVISO: no pude mover '$1' (¿permisos?) — la instalacion sigue; puede quedar duplicado en el DAW"

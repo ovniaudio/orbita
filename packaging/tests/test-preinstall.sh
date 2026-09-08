@@ -104,6 +104,19 @@ run_preinstall "$V" "$H"; rc=$?
 [ "$rc" = 0 ] && ok "caso 5: sale 0" || bad "caso 5: salió $rc"
 [ -e "$V/Library/Audio/Plug-Ins/Components/ORBIT.component" ] && ok "caso 5: sin Info.plist no se toca" || bad "caso 5: retiró un bundle que no pudo identificar"
 
+#--------------------------------------------------------------------------------------------------
+# Caso 6 — "OVNI Audio" del home es un SYMLINK del usuario: no se sigue (el script corre como root).
+#          El bundle viejo se queda donde esta, no se escribe nada del otro lado del enlace, sale 0.
+#--------------------------------------------------------------------------------------------------
+V="$WORK/c6/vol"; H="$WORK/c6/home"; T="$WORK/c6/objetivo-ajeno"; mkdir -p "$V" "$H/Library/Application Support" "$T"
+ln -s "$T" "$H/Library/Application Support/OVNI Audio"
+make_bundle "$H/Library/Audio/Plug-Ins/Components/ORBIT.component" com.ovni.orbit ORBIT
+run_preinstall "$V" "$H"; rc=$?
+[ "$rc" = 0 ] && ok "caso 6: sale 0" || bad "caso 6: salió $rc"
+[ -e "$H/Library/Audio/Plug-Ins/Components/ORBIT.component" ] && ok "caso 6: con un symlink en el destino, el bundle se queda donde está" || bad "caso 6: movió el bundle a través de un symlink"
+[ -z "$(find "$T" -mindepth 1 2>/dev/null)" ] && ok "caso 6: no escribió nada del otro lado del enlace" || bad "caso 6: escribió a través del enlace: $(find "$T" -mindepth 1)"
+grep -q "enlace simbolico" "$WORK/log" && ok "caso 6: lo avisa en el log" || bad "caso 6: no avisó"
+
 echo
 if [ "$fails" = 0 ]; then echo "  preinstall: TODO OK"; exit 0; fi
 echo "  preinstall: $fails comprobacion(es) fallaron"; exit 1
