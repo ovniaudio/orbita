@@ -81,6 +81,11 @@ killall -9 AudioComponentRegistrar
 then rescan plug-ins in your DAW. Your saved projects keep working: the AU identity
 (`aufx / Orbt / Ovni`) and the VST3 unique ID are unchanged — only the file name moved.
 
+**Windows:** there is no installer to retire the old bundle, so delete
+`C:\Program Files\Common Files\VST3\ORBIT.vst3` by hand before copying `OVNI ORBIT.vst3` in.
+If both stay, your DAW sees two plug-ins with the same identity and may show a duplicate or
+load the old one.
+
 ## Build from source
 
 ORBIT is a JUCE project (Pamplejuce layout) and uses git submodules, so clone with

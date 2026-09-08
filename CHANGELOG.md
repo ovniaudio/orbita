@@ -61,6 +61,9 @@ The bundle is renamed in this release. See **Changed** before you update.
     macOS caches the Audio Unit registry by path.
   - **Saved projects keep working.** The Audio Unit identity (`aufx / Orbt / Ovni`) and the
     VST3 unique ID are unchanged; only the file name moved.
+  - **Windows has no installer to retire the old one:** delete
+    `C:\Program Files\Common Files\VST3\ORBIT.vst3` by hand before copying `OVNI ORBIT.vst3`
+    in, or your DAW will see two plug-ins with the same identity.
 
 ### Notes
 
