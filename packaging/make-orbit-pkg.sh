@@ -108,6 +108,33 @@ for b in "$BUNDLES/$NAME.vst3" "$BUNDLES/$NAME.component"; do
 done
 log "guardia de version: los bundles declaran $VERSION ✓"
 
+# --- GUARDIA DE ARQUITECTURA (pre-vuelo). ---
+# SUPERNOVA 0.3.0 estuvo a un pelo de salir arm64-only: el build/ habia quedado en la arquitectura
+# nativa y el empaquetador arma el .pkg igual de contento con un payload thin -- el problema recien
+# aparece en una Mac Intel, DESPUES de publicar. Este repo tiene varias carpetas de build y solo una
+# esta configurada como universal, asi que la trampa esta a un `--bundles` de distancia.
+# Se falla ACA, antes de gastar un productbuild, y se vuelve a verificar sobre el payload real en el
+# post-check (que es lo unico que se distribuye).
+# -L sigue los symlinks: un ejecutable que sea un enlace no es "-type f" y se saltearia en silencio.
+check_universal() { # $1 = bundle
+  local bin archs n=0
+  while IFS= read -r bin; do
+    archs="$(lipo -archs "$bin" 2>/dev/null)"
+    case " $archs " in *" x86_64 "*) ;; *) fail "no universal: ${bin#"$BUNDLES/"} = ${archs:-<no es Mach-O>}" ;; esac
+    case " $archs " in *" arm64 "*)  ;; *) fail "no universal: ${bin#"$BUNDLES/"} = ${archs:-<no es Mach-O>}" ;; esac
+    n=$((n+1))
+  done < <(find -L "$1/Contents/MacOS" -type f -perm -u+x 2>/dev/null)
+  [ "$n" -gt 0 ] || fail "$(basename "$1") no trae ningun ejecutable en Contents/MacOS"
+  # OJO: acumula en una global y NO devuelve por stdout. Llamarla dentro de $( ) haria que el
+  # `fail` matara solo al subshell y el empaquetado siguiera adelante con un payload thin.
+  UNI_BINS=$((UNI_BINS + n))
+}
+UNI_BINS=0
+for b in "$BUNDLES/$NAME.vst3" "$BUNDLES/$NAME.component"; do
+  check_universal "$b"
+done
+log "guardia de arquitectura: $UNI_BINS binarios, todos x86_64 + arm64 ✓"
+
 # --- Payload de cumplimiento AGPLv3: LICENSE + NOTICE + SOURCE. ---
 # SOURCE.txt se GENERA (nunca a mano) desde VERSION y el commit del arbol, y apunta al arbol EXACTO
 # de esta version: eso es lo que pide el §6 — la fuente CORRESPONDIENTE al binario, no "el repo".
@@ -270,8 +297,24 @@ verify_pkg() { # $1 = .pkg
   [ -f "$x/pkg-$SLUG-vst3.pkg/Scripts/preinstall" ] \
     || fail "post-check: $n no lleva el preinstall adentro (pkg-$SLUG-vst3.pkg/Scripts/preinstall)"
 
+  # GUARDIA DE ARQUITECTURA sobre el payload REAL (--expand-full, no --expand): se mira el binario
+  # que de verdad va adentro del paquete, no el que habia en disco cuando se lanzo el script.
+  local bin archs bins=0 bundle
+  while IFS= read -r bin; do
+    archs="$(lipo -archs "$bin" 2>/dev/null)"
+    case " $archs " in *" x86_64 "*) ;; *) fail "post-check: no universal en el payload: ${bin#"$x/"} = ${archs:-<no es Mach-O>}" ;; esac
+    case " $archs " in *" arm64 "*)  ;; *) fail "post-check: no universal en el payload: ${bin#"$x/"} = ${archs:-<no es Mach-O>}" ;; esac
+    bins=$((bins+1))
+  done < <(find -L "$x" -type f -path "*/Contents/MacOS/*" -perm -u+x)
+  [ "$bins" -gt 0 ] || fail "post-check: $n no trae ningun ejecutable en el payload (¿bundles vacios?)"
+  # …y POR BUNDLE, no en total: contar todo junto deja pasar un .component vacio colgado del .vst3.
+  while IFS= read -r bundle; do
+    [ -n "$(find -L "$bundle/Contents/MacOS" -type f -perm -u+x -print -quit 2>/dev/null)" ] \
+      || fail "post-check: $n → ${bundle#"$x/"} sin ejecutable en Contents/MacOS"
+  done < <(find "$x" \( -name "*.vst3" -o -name "*.component" \) -type d)
+
   rm -rf "$x"
-  log "  post-check OK: $n declara $VERSION en $seen componentes + Distribution · preinstall adentro"
+  log "  post-check OK: $n declara $VERSION en $seen componentes + Distribution · preinstall adentro · $bins binarios universales"
 }
 
 # --- Distribution + productbuild. ---
@@ -301,15 +344,19 @@ ${BG_XML}
 </installer-gui-script>
 XML
 
+# Se emite a un temporal y recien se mueve al outdir DESPUES del post-check: un .pkg rechazado no
+# tiene que quedar en la carpeta de entrega, donde alguien lo pueda firmar o subir por error.
 OUT="$OUTDIR/OVNI-ORBIT-v$VERSION.pkg"
+TMP_OUT="$WORK/OVNI-ORBIT-v$VERSION.pkg"
 if [ -n "$INSTALLER_SIGN_ID" ]; then
   productbuild --distribution "$WORK/dist.xml" --package-path "$WORK" --resources "$RES" \
-    --version "$VERSION" --sign "$INSTALLER_SIGN_ID" "$OUT" >&2 || fail "productbuild (firmado)"
+    --version "$VERSION" --sign "$INSTALLER_SIGN_ID" "$TMP_OUT" >&2 || fail "productbuild (firmado)"
 else
   productbuild --distribution "$WORK/dist.xml" --package-path "$WORK" --resources "$RES" \
-    --version "$VERSION" "$OUT" >&2 || fail "productbuild"
+    --version "$VERSION" "$TMP_OUT" >&2 || fail "productbuild"
 fi
-verify_pkg "$OUT"
+verify_pkg "$TMP_OUT"
+mv "$TMP_OUT" "$OUT" || fail "no pude mover el .pkg verificado a $OUT"
 log "✓ $OUT"
 
 ( cd "$OUTDIR" && shasum -a 256 "OVNI-ORBIT-v$VERSION.pkg" > SHA256SUMS.txt )
