@@ -25,7 +25,14 @@ set(PROJECT_NAME "Orbita")
 #   set(PROJECT_NAME "MyPlugin_v${MAJOR_VERSION}")
 # Doing so enables major versions to show up in IDEs and DAWs as separate plugins
 # allowing you to change parameters and behavior without breaking existing user projects
-set(PRODUCT_NAME "ORBIT")
+# D-32 (2026-09-07) — el bundle pasa a llamarse "OVNI ORBIT".
+# El volumen de sistema de macOS es APFS SIN distinguir mayusculas: en
+# /Library/Audio/Plug-Ins/Components/, "Orbit.component" (Phantom Sounds) y
+# "ORBIT.component" (el nuestro) SON EL MISMO NOMBRE, y el instalador que corre
+# ultimo pisa al otro. No es un choque de identidad (la nuestra es aufx/Orbt/Ovni):
+# es un choque de NOMBRE DE ARCHIVO. Prefijar la marca lo resuelve, como hacen
+# FabFilter/Valhalla. PRODUCT_NAME es lo unico que nombra al archivo.
+set(PRODUCT_NAME "OVNI ORBIT")
 
 # Change me! Used for the MacOS bundle name and Installers
 set(COMPANY_NAME "OVNI")
@@ -85,6 +92,21 @@ juce_add_plugin("${PROJECT_NAME}"
     # Note: this must have at least one upper-case character
     PLUGIN_CODE Orbt
     FORMATS "${FORMATS}"
+
+    # La identidad que ve el DAW se CONGELA en "ORBIT" a proposito (D-32): lo unico
+    # que cambia en 0.3.0 es el nombre del archivo. JUCE hace que PLUGIN_NAME,
+    # DESCRIPTION y AU_EXPORT_PREFIX caigan por defecto en PRODUCT_NAME
+    # (JUCE/extras/Build/CMake/JUCEUtils.cmake:1756-1758 y :1890-1892), asi que sin
+    # estas tres lineas el AU pasaria a anunciarse como "OVNI: OVNI ORBIT" (su `name`
+    # es manufacturer + ": " + PLUGIN_NAME, juce_PlistOptions.cpp:334) y su
+    # factoryFunction cambiaria de ORBITAUFactory a OVNI_ORBITAUFactory.
+    # Congelandolas, el dict AudioComponents del AU queda IDENTICO al de v0.2.1 y el
+    # UID del VST3 tampoco se mueve (se deriva solo de PLUGIN_MANUFACTURER_CODE +
+    # PLUGIN_CODE: juce_VST3Interface.h::jucePluginId). Las sesiones guardadas siguen
+    # encontrando el plugin.
+    PLUGIN_NAME "ORBIT"
+    DESCRIPTION "ORBIT"
+    AU_EXPORT_PREFIX ORBITAU
 
     # The name of your final executable
     # This is how it's listed in the DAW

@@ -60,7 +60,8 @@ jobs:
           curl -fsSL -o pluginval.zip "https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_macOS.zip"
           unzip -oq pluginval.zip
           # Resolver el bundle VST3 dinámicamente (igual que el job windows): el PRODUCT_NAME es
-          # "ORBIT" (→ ORBIT.vst3) pero la carpeta *_artefacts deriva de PROJECT_NAME="Orbita".
+          # "OVNI ORBIT" (→ "OVNI ORBIT.vst3", D-32) pero la carpeta *_artefacts deriva de
+          # PROJECT_NAME="Orbita". Resolverlo por glob evita tener que tocar esto al renombrar.
           bundle=$(find build -type d -path '*_artefacts/*/VST3/*.vst3' | head -1)
           echo "pluginval → $bundle"
           ./pluginval.app/Contents/MacOS/pluginval \
@@ -72,8 +73,8 @@ jobs:
         with:
           name: ORBIT-macos
           path: |
-            build/Orbita_artefacts/${{ env.BUILD_TYPE }}/VST3/ORBIT.vst3
-            build/Orbita_artefacts/${{ env.BUILD_TYPE }}/AU/ORBIT.component
+            build/Orbita_artefacts/${{ env.BUILD_TYPE }}/VST3/OVNI ORBIT.vst3
+            build/Orbita_artefacts/${{ env.BUILD_TYPE }}/AU/OVNI ORBIT.component
 
   # ---------------------------------------------------------------------------------------------
   # M6 — Windows (VST3). Build MSVC x64 en windows-latest + pluginval strictness 10.
@@ -104,7 +105,7 @@ jobs:
       - name: Verificar PE x64 (COFF machine = AMD64)
         shell: pwsh
         run: |
-          # El binario PE vive dentro del bundle en Contents\x86_64-win\ORBIT.vst3.
+          # El binario PE vive dentro del bundle en Contents\x86_64-win\"OVNI ORBIT.vst3".
           $bin = Get-ChildItem -Recurse -File -Path build -Filter *.vst3 |
                  Where-Object { $_.FullName -match 'x86_64-win' } | Select-Object -First 1
           if (-not $bin) { Write-Error "No encontré el binario .vst3 (x86_64-win)"; exit 1 }
@@ -131,4 +132,4 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ORBIT-windows-vst3
-          path: build/Orbita_artefacts/${{ env.BUILD_TYPE }}/VST3/ORBIT.vst3
+          path: build/Orbita_artefacts/${{ env.BUILD_TYPE }}/VST3/OVNI ORBIT.vst3

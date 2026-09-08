@@ -55,7 +55,7 @@ Installing from the catalog DMG instead? That manual path needs the
 `xattr -dr com.apple.quarantine …` step described inside the DMG.
 
 **Windows:** download `OVNI-ORBIT-<version>-Windows.zip`, right-click → **Properties** →
-**Unblock** → Apply, then extract `ORBIT.vst3` into `C:\Program Files\Common Files\VST3`.
+**Unblock** → Apply, then extract `OVNI ORBIT.vst3` into `C:\Program Files\Common Files\VST3`.
 SmartScreen may warn the first time — **More info → Run anyway**.
 
 Then rescan plugins in your DAW.
