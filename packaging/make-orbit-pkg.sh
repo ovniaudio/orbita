@@ -242,7 +242,7 @@ UPGRADE_EN='<p>Upgrading from 0.2.x? The bundles are now named <b>OVNI ORBIT</b>
 UPGRADE_ES='<p>¿Venís de 0.2.x? Los bundles ahora se llaman <b>OVNI ORBIT</b>. El instalador retira tu <code>ORBIT.vst3</code>/<code>ORBIT.component</code> viejo (solo si es el nuestro) y lo guarda en <code>Library/Application Support/OVNI Audio/replaced/</code> — el <i>Orbit</i> de otra marca no se toca.</p>'
 cat > "$RES/en.lproj/welcome.html" <<HTML
 <!doctype html><html><head><meta charset="utf-8"><style>body{font-family:-apple-system,'Helvetica Neue',sans-serif;font-size:13px}</style></head><body>
-<p><b>ORBIT — Binaural movement engine: place sound in real 3D, orbit it, fly it past.</b></p>
+<p><b>ORBIT — Binaural movement engine: place a sound around your head, orbit it, or fly it past with real Doppler.</b></p>
 <p>Free &amp; open-source (AGPLv3), by OVNI Audio. The installer places everything in the system plug-in folders — no dragging, no Terminal:</p>
 <p>&nbsp;&nbsp;VST3 → /Library/Audio/Plug-Ins/VST3<br>&nbsp;&nbsp;AU → /Library/Audio/Plug-Ins/Components</p>
 $UPGRADE_EN
@@ -251,7 +251,7 @@ $UPGRADE_EN
 HTML
 cat > "$RES/es.lproj/welcome.html" <<HTML
 <!doctype html><html><head><meta charset="utf-8"><style>body{font-family:-apple-system,'Helvetica Neue',sans-serif;font-size:13px}</style></head><body>
-<p><b>ORBIT — Motor de movimiento binaural: poné el sonido en 3D real, hacelo orbitar, pasalo cerca.</b></p>
+<p><b>ORBIT — Motor de movimiento binaural: poné un sonido alrededor de tu cabeza, hacelo orbitar o pasalo cerca con Doppler real.</b></p>
 <p>Gratis y open-source (AGPLv3), de OVNI Audio. El instalador deja todo en las carpetas de plugins del sistema — sin arrastrar nada, sin Terminal:</p>
 <p>&nbsp;&nbsp;VST3 → /Library/Audio/Plug-Ins/VST3<br>&nbsp;&nbsp;AU → /Library/Audio/Plug-Ins/Components</p>
 $UPGRADE_ES
