@@ -67,7 +67,8 @@ Since **0.3.0** the bundles are named **`OVNI ORBIT.vst3` / `OVNI ORBIT.componen
 other vendor's *Orbit* — the last installer to run overwrote the other one. The new name ends that.
 
 The installer retires the old bundle for you: it removes `ORBIT.vst3` / `ORBIT.component` from
-`/Library/Audio/Plug-Ins` and from your own `~/Library/Audio/Plug-Ins`, **but only if the bundle
+`/Library/Audio/Plug-Ins` and from the `~/Library/Audio/Plug-Ins` of the user running it (other
+accounts on the same Mac: run the installer once each, or delete the old bundle by hand), **but only if the bundle
 identifies itself as `com.ovni.orbit`** — someone else's *Orbit* is never touched. Nothing is
 deleted: the old bundle is moved to `…/Library/Application Support/OVNI Audio/replaced/<date>/`,
 where you can delete it or restore it if you want to go back to 0.2.x.
