@@ -1,4 +1,8 @@
 <?xml version='1.0' encoding='utf8'?>
+<!-- ATENCION (2026-09-07): plantilla de instalador de Pamplejuce; NO es lo que se publica. El .pkg
+     de ORBIT lo arma packaging/make-orbit-pkg.sh, que genera su propio Distribution (customize="never",
+     macOS 11+, VST3 + AU + licencia, con el preinstall que retira el ORBIT viejo, D-32). Nada del repo
+     consume este archivo; queda como referencia de la plantilla. -->
 <installer-gui-script minSpecVersion="2">
     <title>${PRODUCT_NAME}</title>
     <allowed-os-versions>

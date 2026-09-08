@@ -209,6 +209,14 @@ target_compile_definitions(Tests PRIVATE
     HRTF_SOFA_PATH="${libmysofa_SOURCE_DIR}/tests/CIPIC_subject_003_hrir_final_itdInDelayField.sofa"
     ORBITA_REPO_DIR="${CMAKE_SOURCE_DIR}")
 
+# Tests del empaquetado (shell, solo macOS: pkgbuild/productbuild/lipo/clang). Corren con ctest
+# y por lo tanto en el job macOS del CI: el preinstall que retira el ORBIT viejo (D-32) y la
+# guardia universal del .pkg no pueden depender de que alguien se acuerde de correrlos a mano.
+if(APPLE)
+    add_test(NAME packaging_preinstall COMMAND /bin/bash "${CMAKE_SOURCE_DIR}/packaging/tests/test-preinstall.sh")
+    add_test(NAME packaging_arch_gate  COMMAND /bin/bash "${CMAKE_SOURCE_DIR}/packaging/tests/test-arch-gate.sh")
+endif()
+
 # A separate target for Benchmarks (keeps the Tests target fast).
 #
 # OJO: NO usamos `include(Benchmarks)` (el módulo del submódulo cmake/ vendoreado), porque
