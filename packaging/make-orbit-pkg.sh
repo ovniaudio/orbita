@@ -97,6 +97,9 @@ for v in "$BUNDLES"/*.vst3; do
 done
 [ -n "$NAME" ] || fail "no encontre ningun .vst3 en $BUNDLES"
 [ -d "$BUNDLES/$NAME.component" ] || fail "$NAME.vst3 sin su $NAME.component (el .pkg de macOS lleva los dos)"
+# El nombre viejo (hasta 0.2.1) no se empaqueta mas: el preinstall lo retira, y un .pkg que lo
+# instalara volveria a chocar con cualquier otro "Orbit" (D-32).
+[ "$NAME" != "ORBIT" ] || fail "los bundles se llaman ORBIT.*: es el nombre VIEJO; desde 0.3.0 el bundle es \"OVNI ORBIT\" (PRODUCT_NAME en CMakeLists.txt)"
 log "bundle: $NAME  ·  version $VERSION"
 
 # --- DEFENSA 1: guardia de version. ---
@@ -140,8 +143,8 @@ log "guardia de arquitectura: $UNI_BINS binarios, todos x86_64 + arm64 ✓"
 # de esta version: eso es lo que pide el §6 — la fuente CORRESPONDIENTE al binario, no "el repo".
 LIC_ROOT="$WORK/root-license/Library/Audio/Plug-Ins/OVNI Audio"
 mkdir -p "$LIC_ROOT"
-cp "$LICENSE_FILE" "$LIC_ROOT/LICENSE.txt"
-cp "$NOTICE_FILE"  "$LIC_ROOT/NOTICE.txt"
+cp "$LICENSE_FILE" "$LIC_ROOT/LICENSE.txt" || fail "no pude copiar LICENSE"
+cp "$NOTICE_FILE"  "$LIC_ROOT/NOTICE.txt"  || fail "no pude copiar NOTICE"
 COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo "desconocido")"
 DIRTY=""
 [ -n "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ] && DIRTY="  (arbol con cambios sin commitear al empaquetar)"
@@ -299,6 +302,14 @@ verify_pkg() { # $1 = .pkg
       [ "$v" = "$VERSION" ] || fail "post-check: $n → Distribution tiene un <bundle $attr=\"$v\"> (esperaba $VERSION)"
     done < <(xml_attr bundle "$attr" < "$x/Distribution")
   done
+
+  # El payload de cumplimiento (AGPLv3 §4/§6) tiene que viajar entero, y el SOURCE.txt con la version.
+  local lic="$x/pkg-license.pkg/Payload/Library/Audio/Plug-Ins/OVNI Audio"
+  for f in LICENSE.txt NOTICE.txt SOURCE.txt; do
+    [ -s "$lic/$f" ] || fail "post-check: $n no lleva $f en el payload de licencia"
+  done
+  grep -q "tree/v$VERSION" "$lic/SOURCE.txt" || fail "post-check: SOURCE.txt no apunta a tree/v$VERSION"
+  grep -q "Regents of the University of California" "$lic/NOTICE.txt" || fail "post-check: NOTICE.txt sin el aviso de CIPIC"
 
   # El preinstall tiene que estar DENTRO del paquete, no solo en el repo.
   [ -f "$x/pkg-$SLUG-vst3.pkg/Scripts/preinstall" ] \
