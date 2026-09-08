@@ -35,3 +35,7 @@ packaging/Output/*build-release/
 build-universal/
 # cualquier build fuera de source (build-03, build-analisis, ...)
 /build-*/
+
+# Entregables del release (.pkg, bundles staged): pesan MB y se regeneran con
+# packaging/make-orbit-pkg.sh. Nunca al repo publico.
+/dist/
