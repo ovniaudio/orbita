@@ -181,6 +181,13 @@ SCRIPTS="$WORK/scripts"
 mkdir -p "$SCRIPTS"
 cp "$PREINSTALL" "$SCRIPTS/preinstall"
 chmod 755 "$SCRIPTS/preinstall"
+# Se limpian los xattr heredados. OJO: com.apple.provenance lo pone el sistema en CUALQUIER archivo
+# nuevo de macOS 15+ y `xattr -c` no lo saca, asi que pkgbuild igual mete un AppleDouble de 163 B
+# ("._preinstall") al lado del script dentro del paquete. Es inerte -- Installer.app ejecuta
+# "preinstall" por nombre -- y no hay forma de evitarlo desde aca; queda anotado para que nadie
+# vuelva a perseguirlo.
+xattr -cr "$SCRIPTS" 2>/dev/null || true
+find "$SCRIPTS" -name '._*' -delete 2>/dev/null
 
 # --- Component packages (VST3 + AU), NO relocalizables, sin chequeo de version. ---
 RV="$WORK/root-vst3/Library/Audio/Plug-Ins/VST3"
