@@ -198,3 +198,72 @@ TEST_CASE ("ABState: toggle alterna estados sin perder datos", "[ab]")
     REQUIRE (std::abs (rawVal (proc, "width") - 20.0f) < 0.5f);
     REQUIRE (ab.activeSlot() == 'B');
 }
+
+//==================================================================================================
+// Task 9 — D-27: `Left Pocket` suena a la izquierda y `Right Pocket` a la derecha.
+//
+// Bug preexistente (v0.2.1 y anteriores), encontrado midiendo en la ronda 0.3 (informe 23 §1e):
+// los dos presets estaban cruzados. La convención de ORBIT es explícita —`SpatialEngine.h:42`:
+// "0 = frente, + = CCW / izquierda"— y el test [fidelity] de ITD la confirma end-to-end
+// (ITD > 0 ⇒ llega antes al oído izquierdo ⇒ azimut > 0 es la izquierda). `Left Pocket` seteaba
+// orbFixedAz = −45 (derecha). Se mide el BALANCE real de la salida, no el número del preset:
+// así el test cae igual si alguien invierte la convención del motor en vez del preset.
+//==================================================================================================
+static float presetBalanceDb (const char* presetName)
+{
+    PluginProcessor proc;
+    orbita::PresetManager pm (proc.apvts);
+
+    int idx = -1;
+    const auto& all = orbita::factoryPresets();
+    for (int i = 0; i < (int) all.size(); ++i)
+        if (juce::String (all[(size_t) i].name) == juce::String (presetName)) idx = i;
+    REQUIRE (idx >= 0);
+    pm.applyFactory (idx);
+
+    const double SR = 48000.0;
+    const int    N  = 512;
+    proc.setPlayConfigDetails (2, 2, SR, N);
+    proc.prepareToPlay (SR, N);
+
+    juce::Random rng (20260907);          // semilla fija: el test es determinista
+    const int warmupBlocks = 48;          // ~0.5 s de asentamiento (crossfades, reflexiones, limiter)
+    const int measureBlocks = 96;         // ~1.0 s de medición
+    double sumL = 0.0, sumR = 0.0;
+    juce::int64 n = 0;
+
+    juce::AudioBuffer<float> buf (2, N);
+    juce::MidiBuffer midi;
+    for (int blk = 0; blk < warmupBlocks + measureBlocks; ++blk)
+    {
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            auto* d = buf.getWritePointer (ch);
+            for (int i = 0; i < N; ++i) d[i] = 0.25f * (rng.nextFloat() * 2.0f - 1.0f);
+        }
+        // mismo ruido en los dos canales: ORBIT suma a mono antes de espacializar
+        buf.copyFrom (1, 0, buf, 0, 0, N);
+        proc.processBlock (buf, midi);
+
+        if (blk < warmupBlocks) continue;
+        const auto* l = buf.getReadPointer (0);
+        const auto* r = buf.getReadPointer (1);
+        for (int i = 0; i < N; ++i) { sumL += (double) l[i] * l[i]; sumR += (double) r[i] * r[i]; }
+        n += N;
+    }
+
+    const double rmsL = std::sqrt (sumL / (double) n);
+    const double rmsR = std::sqrt (sumR / (double) n);
+    REQUIRE (rmsL > 1.0e-6);
+    REQUIRE (rmsR > 1.0e-6);
+    return (float) (20.0 * std::log10 (rmsL / rmsR));   // > 0 ⇒ izquierda más fuerte
+}
+
+TEST_CASE ("FactoryPresets: Left/Right Pocket ponen la fuente en el lado que dice el nombre", "[preset]")
+{
+    const float left  = presetBalanceDb ("Left Pocket");
+    const float right = presetBalanceDb ("Right Pocket");
+    INFO ("balance L/R en dB (positivo = izquierda): Left Pocket=" << left << "  Right Pocket=" << right);
+    REQUIRE (left  >  3.0f);   // "Left Pocket"  ⇒ izquierda más fuerte
+    REQUIRE (right < -3.0f);   // "Right Pocket" ⇒ derecha  más fuerte
+}
