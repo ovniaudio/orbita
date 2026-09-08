@@ -60,6 +60,27 @@ SmartScreen may warn the first time — **More info → Run anyway**.
 
 Then rescan plugins in your DAW.
 
+### Upgrading from 0.2.x
+
+Since **0.3.0** the bundles are named **`OVNI ORBIT.vst3` / `OVNI ORBIT.component`** (they used to be
+`ORBIT.*`). macOS keeps plug-ins in a case-insensitive folder, so the old name collided with any
+other vendor's *Orbit* — the last installer to run overwrote the other one. The new name ends that.
+
+The installer retires the old bundle for you: it removes `ORBIT.vst3` / `ORBIT.component` from
+`/Library/Audio/Plug-Ins` and from your own `~/Library/Audio/Plug-Ins`, **but only if the bundle
+identifies itself as `com.ovni.orbit`** — someone else's *Orbit* is never touched. Nothing is
+deleted: the old bundle is moved to `…/Library/Application Support/OVNI Audio/replaced/<date>/`,
+where you can delete it or restore it if you want to go back to 0.2.x.
+
+macOS caches the Audio Unit registry by path, so after upgrading:
+
+```bash
+killall -9 AudioComponentRegistrar
+```
+
+then rescan plug-ins in your DAW. Your saved projects keep working: the AU identity
+(`aufx / Orbt / Ovni`) and the VST3 unique ID are unchanged — only the file name moved.
+
 ## Build from source
 
 ORBIT is a JUCE project (Pamplejuce layout) and uses git submodules, so clone with

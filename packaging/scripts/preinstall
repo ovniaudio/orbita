@@ -1,0 +1,101 @@
+#!/bin/sh
+# preinstall — retira el ORBIT anterior de OVNI, y SOLO ese, antes de instalar "OVNI ORBIT".
+#
+# POR QUE EXISTE. En 0.3.0 el bundle pasa a llamarse "OVNI ORBIT" (D-32): el volumen de sistema de
+# macOS es APFS sin distinguir mayusculas, asi que "Orbit.component" (Phantom Sounds) y
+# "ORBIT.component" (el nuestro, hasta 0.2.1) eran EL MISMO NOMBRE de archivo en
+# /Library/Audio/Plug-Ins/Components/ y el ultimo instalador pisaba al otro.
+#
+# Con el nombre nuevo el choque desaparece, pero aparece otro problema: quien ya tenia ORBIT 0.2.x
+# se quedaria con DOS bundles instalados que declaran la MISMA identidad de AU (aufx/Orbt/Ovni) y el
+# DAW mostraria un duplicado. Este script retira el viejo.
+#
+# LA REGLA, Y ES TODO EL PUNTO: se mira el CFBundleIdentifier, NO el nombre del archivo. Solo se
+# toca lo que declara com.ovni.orbit. Cualquier otro "ORBIT.component"/"ORBIT.vst3" -- el de Phantom
+# Sounds o el de quien sea -- se deja exactamente donde esta. Tocarlo seria repetir el bug que
+# estamos arreglando, pero al reves y peor.
+#
+# NADA SE BORRA: lo retirado se MUEVE a
+#     <dominio>/Library/Application Support/OVNI Audio/replaced/<AAAAMMDD-HHMMSS>/
+# que esta FUERA de toda carpeta que escanee un DAW (por eso no se deja dentro de Plug-Ins: varios
+# hosts escanean VST3 recursivamente y volveria a aparecer el duplicado). El usuario puede borrarlo
+# a mano, o volver atras a 0.2.x moviendolo de vuelta.
+#
+# NUNCA hace fallar la instalacion: si algo no se puede mover, lo dice en el log del instalador y
+# sigue. Quedarse sin plugin porque no se pudo limpiar un archivo viejo es peor que el duplicado
+# (que ademas el README explica como resolver a mano).
+#
+# Installer.app llama: $1 = paquete · $2 = destino · $3 = VOLUMEN destino · $4 = raiz del sistema.
+# Se honra $3, asi que funciona igual instalando en "/" que con
+# `installer -target CurrentUserHomeDirectory` (ahi $3 ES el home). ORBIT_PREINSTALL_HOME existe
+# para que packaging/tests/test-preinstall.sh pueda ejercitarlo sobre un arbol falso.
+set -u
+
+OUR_ID="com.ovni.orbit"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+PB="/usr/libexec/PlistBuddy"
+
+log() { printf 'OVNI ORBIT preinstall: %s\n' "$*"; }
+
+# --- Dominios a revisar: el volumen destino y el home del usuario que instala. ---
+VOL="${3:-/}"
+case "$VOL" in
+  "/") VOL="" ;;
+  *)   VOL="${VOL%/}" ;;
+esac
+
+user_home() {
+  if [ -n "${ORBIT_PREINSTALL_HOME:-}" ]; then printf '%s' "${ORBIT_PREINSTALL_HOME%/}"; return 0; fi
+  # El instalador corre como root: $HOME es el de root. El usuario real es el duenio de la consola.
+  u="$(stat -f %Su /dev/console 2>/dev/null)" || return 0
+  [ -n "$u" ] || return 0
+  [ "$u" = "root" ] && return 0
+  h="$(dscl . -read "/Users/$u" NFSHomeDirectory 2>/dev/null | sed -n 's/^NFSHomeDirectory: //p')"
+  [ -n "$h" ] && [ -d "$h" ] && printf '%s' "${h%/}"
+}
+
+bundle_id() { # $1 = ruta del bundle
+  [ -f "$1/Contents/Info.plist" ] || return 1
+  "$PB" -c "Print :CFBundleIdentifier" "$1/Contents/Info.plist" 2>/dev/null
+}
+
+retire() { # $1 = bundle · $2 = raiz del dominio
+  dest="$2/Library/Application Support/OVNI Audio/replaced/$STAMP"
+  if ! mkdir -p "$dest" 2>/dev/null; then
+    log "AVISO: no pude crear '$dest' — dejo '$1' donde esta"
+    return 0
+  fi
+  if mv "$1" "$dest/" 2>/dev/null; then
+    log "retirado: '$1' → '$dest/'"
+    # El cajon del usuario tiene que quedar del usuario, no de root.
+    if [ -n "$2" ] && owner="$(stat -f %u:%g "$2" 2>/dev/null)"; then
+      chown -R "$owner" "$2/Library/Application Support/OVNI Audio" 2>/dev/null || true
+    fi
+  else
+    log "AVISO: no pude mover '$1' (¿permisos?) — la instalacion sigue; puede quedar duplicado en el DAW"
+  fi
+}
+
+seen=""
+for root in "$VOL" "$(user_home)"; do
+  # "" es el dominio del sistema (/). Se saltean los dominios repetidos: con
+  # -target CurrentUserHomeDirectory, el volumen Y el home son la misma carpeta.
+  case " $seen " in *" [$root] "*) continue ;; esac
+  seen="$seen [$root]"
+
+  for rel in "Library/Audio/Plug-Ins/VST3/ORBIT.vst3" "Library/Audio/Plug-Ins/Components/ORBIT.component"; do
+    b="$root/$rel"
+    [ -d "$b" ] || continue
+    if ! id_found="$(bundle_id "$b")" || [ -z "$id_found" ]; then
+      log "'$b' no declara CFBundleIdentifier — no es identificable, lo dejo en paz"
+      continue
+    fi
+    if [ "$id_found" = "$OUR_ID" ]; then
+      retire "$b" "$root"
+    else
+      log "'$b' es de otro ($id_found) — NO se toca"
+    fi
+  done
+done
+
+exit 0
